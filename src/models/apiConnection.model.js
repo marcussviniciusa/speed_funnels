@@ -7,6 +7,15 @@ module.exports = (sequelize) => {
       primaryKey: true,
       autoIncrement: true,
     },
+    userId: {
+      type: DataTypes.INTEGER,
+      allowNull: false,
+      field: 'user_id',
+      references: {
+        model: 'users',
+        key: 'id',
+      },
+    },
     companyId: {
       type: DataTypes.INTEGER,
       allowNull: false,
@@ -55,7 +64,11 @@ module.exports = (sequelize) => {
       foreignKey: 'companyId',
       as: 'company',
     });
+    ApiConnection.belongsTo(models.User, {
+      foreignKey: 'userId',
+      as: 'user',
+    });
   };
 
   return ApiConnection;
-}; 
+};

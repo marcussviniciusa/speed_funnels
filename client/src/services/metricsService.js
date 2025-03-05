@@ -12,7 +12,7 @@ const metricsService = {
    */
   getMetaMetrics: async (adAccountId, dateRange) => {
     try {
-      const response = await api.get(`/api/integrations/meta/metrics/${adAccountId}`, {
+      const response = await api.get(`/api/metrics/meta/${adAccountId}`, {
         params: dateRange
       });
       return response.data;
@@ -30,7 +30,7 @@ const metricsService = {
    */
   getGoogleMetrics: async (propertyId, dateRange) => {
     try {
-      const response = await api.get(`/api/integrations/google/metrics/${propertyId}`, {
+      const response = await api.get(`/api/metrics/google/${propertyId}`, {
         params: dateRange
       });
       return response.data;
@@ -46,7 +46,7 @@ const metricsService = {
    */
   getMetaAdAccounts: async () => {
     try {
-      const response = await api.get('/api/integrations/meta/accounts');
+      const response = await api.get('/api/metrics/meta/accounts');
       return response.data;
     } catch (error) {
       console.error('Erro ao obter contas de anúncios do Meta:', error);
@@ -60,7 +60,7 @@ const metricsService = {
    */
   getGoogleProperties: async () => {
     try {
-      const response = await api.get('/api/integrations/google/properties');
+      const response = await api.get('/api/metrics/google/properties');
       return response.data;
     } catch (error) {
       console.error('Erro ao obter propriedades do Google Analytics:', error);

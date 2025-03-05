@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useCallback } from 'react';
 import { 
   Box, 
   Typography, 
@@ -36,8 +36,8 @@ import {
   BarElement
 } from 'chart.js';
 import { Line, Bar } from 'react-chartjs-2';
-import api from '../services/api';
 import integrationService from '../services/integrationService';
+import metricsService from '../services/metricsService';
 import MetricsDashboard from '../components/dashboard/MetricsDashboard';
 
 // Register ChartJS components
@@ -60,18 +60,15 @@ const Dashboard = () => {
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState('');
   const [data, setData] = useState(null);
-  const [integrations, setIntegrations] = useState({});
+  const [metaAccounts, setMetaAccounts] = useState([]);
+  const [selectedMetaAccount, setSelectedMetaAccount] = useState('');
+  const [googleProperties, setGoogleProperties] = useState([]);
+  const [selectedGoogleProperty, setSelectedGoogleProperty] = useState('');
   const [hasActiveIntegrations, setHasActiveIntegrations] = useState(false);
   const [dashboardTab, setDashboardTab] = useState(0);
 
   // Buscar dados do dashboard
-  useEffect(() => {
-    fetchDashboardData();
-    fetchIntegrations();
-  }, [platform]);
-
-  // Buscar dados do dashboard
-  const fetchDashboardData = async () => {
+  const fetchDashboardData = useCallback(async () => {
     setLoading(true);
     setError('');
     
@@ -79,12 +76,27 @@ const Dashboard = () => {
       const formattedStartDate = format(startDate, 'yyyy-MM-dd');
       const formattedEndDate = format(endDate, 'yyyy-MM-dd');
       
-      const response = await api.get(`/api/dashboard/${platform}`, {
-        params: {
-          startDate: formattedStartDate,
-          endDate: formattedEndDate
-        }
-      });
+      let response;
+      
+      if (platform === 'meta' && selectedMetaAccount) {
+        response = await metricsService.getMetaMetrics(
+          selectedMetaAccount,
+          {
+            startDate: formattedStartDate,
+            endDate: formattedEndDate
+          }
+        );
+      } else if (platform === 'google' && selectedGoogleProperty) {
+        response = await metricsService.getGoogleMetrics(
+          selectedGoogleProperty,
+          {
+            startDate: formattedStartDate,
+            endDate: formattedEndDate
+          }
+        );
+      } else {
+        throw new Error('Selecione uma conta ou propriedade válida');
+      }
       
       setData(response.data);
     } catch (err) {
@@ -93,22 +105,63 @@ const Dashboard = () => {
     } finally {
       setLoading(false);
     }
-  };
+  }, [platform, selectedMetaAccount, selectedGoogleProperty, startDate, endDate]);
 
   // Buscar integrações
-  const fetchIntegrations = async () => {
+  const fetchIntegrations = useCallback(async () => {
     try {
-      const response = await integrationService.getIntegrations();
-      const integrations = response.data.data || {};
-      setIntegrations(integrations);
+      // Verificar integrações ativas
+      const integrationsResponse = await integrationService.getIntegrations();
+      const integrations = integrationsResponse.data.data || {};
       
       // Verificar se há integrações ativas
       const hasActive = Object.values(integrations).some(integration => integration && integration.isActive);
       setHasActiveIntegrations(hasActive);
+      
+      if (hasActive) {
+        // Buscar contas do Meta Ads
+        try {
+          const metaAccountsResponse = await metricsService.getMetaAdAccounts();
+          const accounts = metaAccountsResponse.data || [];
+          setMetaAccounts(accounts);
+          
+          if (accounts.length > 0 && platform === 'meta') {
+            setSelectedMetaAccount(accounts[0].id);
+          }
+        } catch (err) {
+          console.error('Erro ao buscar contas do Meta:', err);
+        }
+        
+        // Buscar propriedades do Google Analytics
+        try {
+          const googlePropertiesResponse = await metricsService.getGoogleProperties();
+          const properties = googlePropertiesResponse.data || [];
+          setGoogleProperties(properties);
+          
+          if (properties.length > 0 && platform === 'google') {
+            setSelectedGoogleProperty(properties[0].id);
+          }
+        } catch (err) {
+          console.error('Erro ao buscar propriedades do Google:', err);
+        }
+      }
     } catch (err) {
       console.error('Erro ao buscar integrações:', err);
     }
-  };
+  }, [platform]);
+
+  // Buscar dados do dashboard e integrações
+  useEffect(() => {
+    fetchIntegrations();
+  }, [platform, fetchIntegrations]);
+
+  // Efeito para buscar dados quando a conta ou propriedade mudar
+  useEffect(() => {
+    if ((platform === 'meta' && selectedMetaAccount) || 
+        (platform === 'google' && selectedGoogleProperty)) {
+      fetchDashboardData();
+    }
+  }, [selectedMetaAccount, selectedGoogleProperty, fetchDashboardData, platform]);
 
   const handleSubmit = (e) => {
     e.preventDefault();
@@ -118,7 +171,7 @@ const Dashboard = () => {
   const renderMetaDashboard = () => {
     if (!data) return null;
 
-    const { impressions, clicks, spend, ctr, cpc, conversions } = data;
+    const { impressions, clicks, spend, conversions } = data;
 
     const chartData = {
       labels: impressions.map(item => item.date),
@@ -405,7 +458,7 @@ const Dashboard = () => {
             <CardContent>
               <Box component="form" onSubmit={handleSubmit}>
                 <Grid container spacing={2} alignItems="center">
-                  <Grid item xs={12} md={3}>
+                  <Grid item xs={12} md={2}>
                     <FormControl fullWidth>
                       <InputLabel id="platform-select-label">Plataforma</InputLabel>
                       <Select
@@ -420,7 +473,52 @@ const Dashboard = () => {
                       </Select>
                     </FormControl>
                   </Grid>
-                  <Grid item xs={12} md={3}>
+                  
+                  {platform === 'meta' && (
+                    <Grid item xs={12} md={2}>
+                      <FormControl fullWidth>
+                        <InputLabel id="account-select-label">Conta de Anúncios</InputLabel>
+                        <Select
+                          labelId="account-select-label"
+                          id="account-select"
+                          value={selectedMetaAccount}
+                          label="Conta de Anúncios"
+                          onChange={(e) => setSelectedMetaAccount(e.target.value)}
+                          disabled={metaAccounts.length === 0}
+                        >
+                          {metaAccounts.map(account => (
+                            <MenuItem key={account.id} value={account.id}>
+                              {account.name}
+                            </MenuItem>
+                          ))}
+                        </Select>
+                      </FormControl>
+                    </Grid>
+                  )}
+                  
+                  {platform === 'google' && (
+                    <Grid item xs={12} md={2}>
+                      <FormControl fullWidth>
+                        <InputLabel id="property-select-label">Propriedade</InputLabel>
+                        <Select
+                          labelId="property-select-label"
+                          id="property-select"
+                          value={selectedGoogleProperty}
+                          label="Propriedade"
+                          onChange={(e) => setSelectedGoogleProperty(e.target.value)}
+                          disabled={googleProperties.length === 0}
+                        >
+                          {googleProperties.map(property => (
+                            <MenuItem key={property.id} value={property.id}>
+                              {property.name}
+                            </MenuItem>
+                          ))}
+                        </Select>
+                      </FormControl>
+                    </Grid>
+                  )}
+                  
+                  <Grid item xs={12} md={2}>
                     <LocalizationProvider dateAdapter={AdapterDateFns} adapterLocale={ptBR}>
                       <DatePicker
                         label="Data de Início"
@@ -430,7 +528,7 @@ const Dashboard = () => {
                       />
                     </LocalizationProvider>
                   </Grid>
-                  <Grid item xs={12} md={3}>
+                  <Grid item xs={12} md={2}>
                     <LocalizationProvider dateAdapter={AdapterDateFns} adapterLocale={ptBR}>
                       <DatePicker
                         label="Data de Fim"
@@ -440,7 +538,7 @@ const Dashboard = () => {
                       />
                     </LocalizationProvider>
                   </Grid>
-                  <Grid item xs={12} md={3}>
+                  <Grid item xs={12} md={2}>
                     <Button
                       type="submit"
                       variant="contained"

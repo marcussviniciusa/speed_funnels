@@ -11,6 +11,7 @@ const companyRoutes = require('./routes/company.routes');
 const reportRoutes = require('./routes/report.routes');
 const integrationRoutes = require('./routes/integration.routes');
 const scheduleRoutes = require('./routes/schedule.routes');
+const metricsRoutes = require('./routes/metrics.routes');
 const { initCronJobs } = require('./config/cron');
 
 dotenv.config();
@@ -77,6 +78,10 @@ app.get('/', (req, res) => {
         </div>
         
         <div class="endpoint">
+          <p><span class="method">GET</span> <code>/api/users/me</code> - Dados do usuário autenticado</p>
+        </div>
+        
+        <div class="endpoint">
           <p><span class="method">GET</span> <code>/api/users/profile</code> - Perfil do usuário autenticado</p>
         </div>
         
@@ -111,6 +116,7 @@ app.use('/api/companies', companyRoutes);
 app.use('/api/reports', reportRoutes);
 app.use('/api/integrations', integrationRoutes);
 app.use('/api/schedules', scheduleRoutes);
+app.use('/api/metrics', metricsRoutes);
 
 // Tratamento de erros
 app.use((err, req, res, next) => {
@@ -126,19 +132,31 @@ app.use((err, req, res, next) => {
 // Inicialização do servidor
 async function startServer() {
   try {
-    await sequelize.authenticate();
-    console.log('Conexão com o banco de dados estabelecida com sucesso.');
-    
-    app.listen(PORT, () => {
-      console.log(`Servidor rodando na porta ${PORT}`);
+    if (process.env.NODE_ENV === 'development_no_db') {
+      console.log('Iniciando servidor em modo de desenvolvimento sem banco de dados...');
+      app.listen(PORT, () => {
+        console.log(`Servidor rodando na porta ${PORT}`);
+      });
+    } else {
+      await sequelize.authenticate();
+      console.log('Conexão com o banco de dados estabelecida com sucesso.');
       
-      // Inicializar cron jobs
-      if (process.env.ENABLE_CRON_JOBS === 'true') {
-        initCronJobs();
-      }
-    });
+      app.listen(PORT, () => {
+        console.log(`Servidor rodando na porta ${PORT}`);
+        
+        // Inicializar cron jobs
+        if (process.env.ENABLE_CRON_JOBS === 'true') {
+          initCronJobs();
+        }
+      });
+    }
   } catch (error) {
     console.error('Erro ao conectar ao banco de dados:', error);
+    console.log('Tentando iniciar sem o banco de dados...');
+    
+    app.listen(PORT, () => {
+      console.log(`Servidor rodando na porta ${PORT} (sem banco de dados)`);
+    });
   }
 }
 

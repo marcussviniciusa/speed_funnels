@@ -1,11 +1,12 @@
 const jwt = require('jsonwebtoken');
 const createError = require('http-errors');
+const { User, Company } = require('../models');
 
-// Middleware de autenticação simplificado para desenvolvimento
+// Middleware de autenticação
 exports.authenticate = async (req, res, next) => {
   try {
     // Em ambiente de desenvolvimento, simular um usuário autenticado
-    if (process.env.NODE_ENV === 'development' || !process.env.NODE_ENV) {
+    if (process.env.NODE_ENV === 'development') {
       req.user = {
         id: 1,
         email: 'teste@example.com',
@@ -27,13 +28,28 @@ exports.authenticate = async (req, res, next) => {
     // Verificar token
     const decoded = jwt.verify(token, process.env.JWT_SECRET || 'your-secret-key');
     
-    // Em um ambiente real, aqui buscaríamos o usuário no banco de dados
-    // const user = await User.findByPk(decoded.id);
+    // Buscar o usuário no banco de dados
+    const user = await User.findByPk(decoded.id, {
+      include: [{
+        model: Company,
+        as: 'companies',
+        through: { attributes: ['role'] }
+      }]
+    });
+    
+    if (!user) {
+      throw createError(401, 'Usuário não encontrado');
+    }
     
     // Adicionar usuário ao objeto de requisição
     req.user = {
-      ...decoded,
-      companyId: decoded.companyId || 1 // Garantir que sempre temos um companyId
+      id: user.id,
+      email: user.email,
+      name: user.name,
+      role: user.role,
+      companies: user.companies,
+      // Se o usuário tiver empresas, usar a primeira como padrão
+      companyId: user.companies && user.companies.length > 0 ? user.companies[0].id : null
     };
     
     next();
@@ -49,14 +65,14 @@ exports.authenticate = async (req, res, next) => {
 };
 
 // Middleware de autorização baseado em roles
-exports.authorize = (...roles) => {
+exports.authorize = (roles = []) => {
   return (req, res, next) => {
     if (!req.user) {
-      return next(createError(401, 'Usuário não autenticado'));
+      return next(createError(401, 'Não autenticado'));
     }
     
-    if (!roles.includes(req.user.role)) {
-      return next(createError(403, 'Acesso não autorizado'));
+    if (roles.length && !roles.includes(req.user.role)) {
+      return next(createError(403, 'Acesso negado'));
     }
     
     next();

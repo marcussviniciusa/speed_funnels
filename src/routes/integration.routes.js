@@ -6,9 +6,13 @@ const { authenticate } = require('../middlewares/auth.middleware');
 // Middleware de autenticação para todas as rotas
 router.use(authenticate);
 
+// Listar todas as integrações do usuário atual
+router.get('/', integrationController.getAllIntegrations);
+
 // Rotas para Meta
 router.get('/meta/auth/:companyId', integrationController.startMetaIntegration);
 router.get('/meta/callback', integrationController.metaCallback);
+router.post('/meta/connect/:companyId', integrationController.connectMetaWithToken);
 
 // Rotas para Google Analytics
 router.get('/google/auth/:companyId', integrationController.startGoogleIntegration);

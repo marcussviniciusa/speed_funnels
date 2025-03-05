@@ -15,12 +15,7 @@ client/.cache/
 client/node_modules/.cache/
 *.pack
 
-# Variáveis de ambiente
-.env
-.env.local
-.env.development.local
-.env.test.local
-.env.production.local
+
 
 # Logs
 npm-debug.log*

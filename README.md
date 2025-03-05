@@ -1,131 +1,194 @@
 # Speed Funnels
 
-Speed Funnels é uma aplicação para análise e geração de relatórios de marketing digital, integrando-se com plataformas como Meta Ads e Google Analytics.
+Speed Funnels é uma plataforma de integração de marketing que conecta Meta Ads e Google Analytics para otimizar funis de conversão.
 
-## Funcionalidades
+## Funcionalidades Principais
 
-- Dashboard de métricas de campanhas do Meta Ads
-- Dashboard de métricas do Google Analytics
-- Criação de relatórios personalizados
-- Compartilhamento de relatórios via links públicos
-- Agendamento de relatórios por e-mail
+- Integração com Meta Ads (Facebook/Instagram)
+- Integração com Google Analytics
+- Análise de funis de conversão
+- Relatórios personalizados
+- Dashboard interativo
 
 ## Tecnologias Utilizadas
 
-- Node.js
-- Express.js
-- Sequelize ORM
-- JWT para autenticação
-- APIs do Meta Ads e Google Analytics
+- **Backend**: Node.js, Express
+- **Frontend**: React
+- **Banco de Dados**: PostgreSQL
+- **Autenticação**: JWT
+- **Deploy**: Docker, Portainer, Traefik
+- **CI/CD**: GitHub Actions
 
-## Configuração do Ambiente
+## Requisitos
 
-### Pré-requisitos
+- Node.js 18+
+- PostgreSQL 14+
+- Docker e Docker Compose (para deploy)
 
-- Node.js (v14+)
-- npm (v6+)
-- MySQL ou outro banco de dados compatível com Sequelize
+## Instalação e Configuração
 
-### Instalação
+### Desenvolvimento Local
 
 1. Clone o repositório:
-   ```
-   git clone https://github.com/seu-usuario/speed_funnels.git
+   ```bash
+   git clone https://github.com/marcussviniciusa/speed_funnels.git
    cd speed_funnels
    ```
 
 2. Instale as dependências:
-   ```
+   ```bash
    npm install
    ```
 
 3. Configure as variáveis de ambiente:
-   - Crie um arquivo `.env` na raiz do projeto com base no arquivo `.env.example`
-   - Configure as credenciais do banco de dados, chave JWT e outras configurações necessárias
+   ```bash
+   cp .env.example .env
+   # Edite o arquivo .env com suas configurações
+   ```
 
-4. Inicie o servidor:
+4. Inicie o banco de dados:
+   ```bash
+   docker-compose up -d db
    ```
-   npm start
+
+5. Execute as migrações:
+   ```bash
+   npm run migrate
    ```
+
+6. Inicie a aplicação:
+   ```bash
+   npm run dev
+   ```
+
+### Deploy com Docker e Traefik
+
+Para deploy em produção, utilizamos Docker com Traefik como proxy reverso para:
+- Gerenciamento automático de certificados SSL
+- Roteamento de tráfego
+- Load balancing
+
+#### Opção 1: Deploy Automatizado com Portainer
+
+1. Configure as variáveis de ambiente:
+   ```bash
+   cp .env.example .env
+   # Edite o arquivo .env com suas configurações
+   ```
+
+2. Gere o hash da senha para o Traefik:
+   ```bash
+   ./scripts/generate-traefik-password.sh
+   ```
+
+3. Execute o script de deploy:
+   ```bash
+   ./deploy-portainer.sh <PORTAINER_URL> <PORTAINER_USERNAME> <PORTAINER_PASSWORD>
+   ```
+
+#### Opção 2: Deploy com YAML no Portainer
+
+Se você já tem o Portainer e o Traefik instalados:
+
+1. Configure as variáveis de ambiente:
+   ```bash
+   cp .env.example .env
+   # Edite o arquivo .env com suas configurações
+   ```
+
+2. Use o script de deploy com YAML:
+   ```bash
+   ./scripts/deploy-yaml.sh <PORTAINER_URL> <PORTAINER_USERNAME> <PORTAINER_PASSWORD> <ENDPOINT_ID>
+   ```
+
+Ou faça o deploy manualmente no Portainer usando o arquivo `portainer-stack.yml`.
+
+Para mais detalhes, consulte o [Guia de Deploy com YAML no Portainer](PORTAINER-YAML-DEPLOY.md).
+
+#### Opção 3: Deploy Manual
+
+1. Configure as variáveis de ambiente:
+   ```bash
+   cp .env.example .env
+   # Edite o arquivo .env com suas configurações
+   ```
+
+2. Construa e inicie os contêineres:
+   ```bash
+   docker-compose up -d
+   ```
+
+Para mais detalhes sobre o deploy, consulte os guias:
+- [Guia de Deploy com Portainer e Traefik](docs/portainer-traefik-deploy-guide.md)
+- [Guia de Integração com Meta Ads](README-META-INTEGRATION.md)
 
 ## Estrutura do Projeto
 
 ```
 speed_funnels/
-├── src/
-│   ├── config/          # Configurações da aplicação
-│   ├── controllers/     # Controladores das rotas
-│   ├── middlewares/     # Middlewares personalizados
-│   ├── models/          # Modelos do Sequelize
-│   ├── routes/          # Definição das rotas
-│   ├── services/        # Serviços para lógica de negócios
-│   ├── jobs/            # Jobs agendados
-│   └── index.js         # Ponto de entrada da aplicação
-├── database/            # Migrações e seeders
-├── .env                 # Variáveis de ambiente
-├── package.json
-└── README.md
+├── client/              # Frontend React
+├── server/              # Backend Node.js/Express
+├── scripts/             # Scripts utilitários
+├── traefik/             # Configurações do Traefik
+├── docs/                # Documentação
+├── docker-compose.yml   # Configuração Docker Compose
+├── Dockerfile           # Dockerfile para build da aplicação
+└── traefik.yml          # Configuração principal do Traefik
 ```
 
-## API Endpoints
+## Scripts Utilitários
 
-### Autenticação
+- `scripts/generate-traefik-password.sh`: Gera hash de senha para o Traefik
+- `scripts/monitor.sh`: Monitora e gerencia contêineres
+- `scripts/db-backup.sh`: Backup e restauração do banco de dados
+- `scripts/test-direct-meta-integration.js`: Testa integração direta com Meta Ads
+- `scripts/test-meta-metrics.js`: Testa recuperação de métricas do Meta Ads
 
-- `POST /api/auth/login` - Login de usuário
-- `POST /api/auth/register` - Registro de novo usuário (requer permissão de admin)
+## Integração com Meta Ads
 
-### Usuários
+A integração com Meta Ads pode ser feita de duas formas:
+1. **Conexão Direta**: Utilizando token de acesso
+2. **Fluxo OAuth**: Autenticação completa via OAuth
 
-- `GET /api/users/profile` - Perfil do usuário autenticado
-- `PUT /api/users/profile` - Atualizar perfil do usuário
+Para mais detalhes, consulte o [Guia de Integração com Meta Ads](README-META-INTEGRATION.md).
 
-### Empresas
+## Monitoramento e Manutenção
 
-- `GET /api/companies` - Listar empresas
-- `GET /api/companies/:id` - Detalhes de uma empresa
-- `POST /api/companies` - Criar nova empresa (requer permissão de admin)
-- `PUT /api/companies/:id` - Atualizar empresa
-- `DELETE /api/companies/:id` - Excluir empresa (requer permissão de admin)
-
-### Relatórios
-
-- `GET /api/reports/list` - Listar relatórios
-- `GET /api/reports/:reportId` - Detalhes de um relatório
-- `POST /api/reports/create` - Criar novo relatório
-- `PUT /api/reports/:reportId` - Atualizar relatório
-- `DELETE /api/reports/:reportId` - Excluir relatório
-- `POST /api/reports/:reportId/share` - Criar link público para compartilhamento
-- `GET /api/reports/public/:publicId` - Acessar relatório público
-
-### Dashboards
-
-- `GET /api/reports/meta/dashboard` - Dashboard de dados do Meta Ads
-- `GET /api/reports/google/dashboard` - Dashboard de dados do Google Analytics
-
-### Integrações
-
-- `GET /api/integrations` - Listar integrações
-- `POST /api/integrations/meta/connect` - Conectar com Meta Ads
-- `POST /api/integrations/google/connect` - Conectar com Google Analytics
-- `DELETE /api/integrations/:id` - Remover integração
-
-### Agendamentos
-
-- `GET /api/schedules` - Listar agendamentos de relatórios
-- `POST /api/schedules` - Criar novo agendamento
-- `PUT /api/schedules/:id` - Atualizar agendamento
-- `DELETE /api/schedules/:id` - Excluir agendamento
-
-## Modo de Desenvolvimento
-
-Para facilitar o desenvolvimento sem necessidade de um banco de dados, o projeto inclui modos de simulação:
-
-```
-npm run dev
+Para monitorar os contêineres:
+```bash
+./scripts/monitor.sh status
 ```
 
-No modo de desenvolvimento, a autenticação é simulada e dados mockados são usados para testes.
+Para visualizar logs:
+```bash
+./scripts/monitor.sh logs speed-funnels-app
+```
+
+Para verificar o status do Traefik:
+```bash
+./scripts/monitor.sh traefik-status
+```
+
+## Backup e Restauração
+
+Para fazer backup do banco de dados:
+```bash
+./scripts/db-backup.sh backup
+```
+
+Para restaurar o banco de dados:
+```bash
+./scripts/db-backup.sh restore arquivo_de_backup.sql
+```
+
+## Contribuição
+
+1. Faça um fork do projeto
+2. Crie uma branch para sua feature (`git checkout -b feature/nova-feature`)
+3. Commit suas mudanças (`git commit -am 'Adiciona nova feature'`)
+4. Push para a branch (`git push origin feature/nova-feature`)
+5. Crie um novo Pull Request
 
 ## Licença
 
-ISC
+Este projeto está licenciado sob a licença MIT - veja o arquivo [LICENSE](LICENSE) para mais detalhes.

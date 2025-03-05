@@ -1,0 +1,62 @@
+# Arquivos e diretórios do Node.js
+node_modules
+npm-debug.log
+yarn-debug.log
+yarn-error.log
+
+# Arquivos e diretórios do cliente React
+client/node_modules
+client/build
+client/.env
+client/.env.local
+client/.env.development.local
+client/.env.test.local
+client/.env.production.local
+client/npm-debug.log
+client/yarn-debug.log
+client/yarn-error.log
+
+# Arquivos de ambiente
+.env
+.env.*
+!.env.example
+
+# Arquivos de controle de versão
+.git
+.gitignore
+.github
+
+# Arquivos Docker
+Dockerfile
+docker-compose.yml
+.dockerignore
+
+# Arquivos de documentação
+README.md
+README-*.md
+docs/
+*.md
+
+# Arquivos de teste
+tests/
+__tests__/
+*.test.js
+*.spec.js
+
+# Arquivos de deploy
+deploy-*.sh
+*.tar
+*.zip
+
+# Arquivos de log
+logs/
+*.log
+
+# Outros arquivos e diretórios
+.DS_Store
+.idea/
+.vscode/
+coverage/
+dist/
+tmp/
+temp/

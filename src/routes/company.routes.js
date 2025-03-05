@@ -1,42 +1,24 @@
 const express = require('express');
 const router = express.Router();
+const companyController = require('../controllers/company.controller');
+const { authenticate } = require('../middlewares/auth.middleware');
 
-// Placeholder para middleware de autenticação
-const authMiddleware = (req, res, next) => {
-  // Simulando um usuário autenticado
-  req.user = { id: 1, name: 'Usuário Teste', email: 'teste@example.com', role: 'admin' };
-  next();
-};
+// Middleware de autenticação para todas as rotas
+router.use(authenticate);
 
-// Controladores de empresa
-const getCompanyDetails = (req, res) => {
-  res.json({ message: 'Detalhes da empresa', company: {} });
-};
+// Listar todas as empresas do usuário
+router.get('/', companyController.getUserCompanies);
 
-const updateCompany = (req, res) => {
-  res.json({ message: 'Empresa atualizada com sucesso' });
-};
+// Criar uma nova empresa
+router.post('/', companyController.createCompany);
 
-const listCompanies = (req, res) => {
-  res.json({ message: 'Lista de empresas', companies: [] });
-};
+// Obter detalhes de uma empresa específica
+router.get('/:companyId', companyController.getCompanyDetails);
 
-const createCompany = (req, res) => {
-  res.json({ message: 'Empresa criada com sucesso' });
-};
+// Atualizar uma empresa
+router.put('/:companyId', companyController.updateCompany);
 
-const deleteCompany = (req, res) => {
-  res.json({ message: 'Empresa excluída com sucesso' });
-};
-
-// Rotas para empresa atual
-router.get('/current', authMiddleware, getCompanyDetails);
-router.put('/current', authMiddleware, updateCompany);
-
-// Rotas para gerenciamento de empresas (apenas superadmin)
-router.get('/', authMiddleware, listCompanies);
-router.post('/', authMiddleware, createCompany);
-router.put('/:id', authMiddleware, updateCompany);
-router.delete('/:id', authMiddleware, deleteCompany);
+// Adicionar usuário a uma empresa
+router.post('/:companyId/users', companyController.addUserToCompany);
 
 module.exports = router;

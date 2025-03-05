@@ -5,7 +5,6 @@ import {
   Paper,
   Typography,
   CircularProgress,
-  Divider,
   FormControl,
   InputLabel,
   Select,
@@ -50,6 +49,13 @@ import {
   Filler
 } from 'chart.js';
 
+// Importar serviços
+import metricsService from '../../services/metricsService';
+
+// Componentes
+import MetricCard from './MetricCard';
+import NoDataPlaceholder from './NoDataPlaceholder';
+
 // Registrar componentes do Chart.js
 ChartJS.register(
   CategoryScale,
@@ -63,14 +69,6 @@ ChartJS.register(
   Legend,
   Filler
 );
-
-// Importar serviços
-import metricsService from '../../services/metricsService';
-import integrationService from '../../services/integrationService';
-
-// Componentes
-import MetricCard from './MetricCard';
-import NoDataPlaceholder from './NoDataPlaceholder';
 
 /**
  * Dashboard de métricas das integrações
@@ -135,13 +133,6 @@ const MetricsDashboard = () => {
     }
   };
   
-  // Buscar métricas quando a seleção mudar
-  useEffect(() => {
-    if (selectedMetaAccount || selectedGoogleProperty) {
-      fetchMetrics();
-    }
-  }, [selectedMetaAccount, selectedGoogleProperty, dateRange]);
-  
   // Buscar métricas
   const fetchMetrics = async () => {
     setLoading(prev => ({ ...prev, metrics: true }));
@@ -175,23 +166,28 @@ const MetricsDashboard = () => {
       }
       
       // Processar métricas combinadas
-      const processedMetrics = metricsService.processCombinedMetrics(
-        metaMetrics,
-        googleMetrics
-      );
+      const combinedMetrics = metricsService.processCombinedMetrics(metaMetrics, googleMetrics);
+      setMetrics(combinedMetrics);
       
-      setMetrics(processedMetrics);
-      
-      // Gerar dados para gráficos
-      const chartData = metricsService.generateChartData(processedMetrics);
+      // Gerar dados para os gráficos
+      const chartData = metricsService.generateChartData(combinedMetrics);
       setChartData(chartData);
+      
+      setError('');
     } catch (err) {
-      console.error('Erro ao carregar métricas:', err);
-      setError('Não foi possível carregar as métricas. Tente novamente mais tarde.');
+      console.error('Erro ao buscar métricas:', err);
+      setError('Não foi possível carregar as métricas. Por favor, tente novamente.');
     } finally {
       setLoading(prev => ({ ...prev, metrics: false }));
     }
   };
+  
+  // Buscar métricas com base nas contas selecionadas e intervalo de datas
+  useEffect(() => {
+    if ((selectedMetaAccount || selectedGoogleProperty) && dateRange.startDate && dateRange.endDate) {
+      fetchMetrics();
+    }
+  }, [selectedMetaAccount, selectedGoogleProperty, dateRange]);
   
   // Manipular mudança de tab
   const handleTabChange = (event, newValue) => {

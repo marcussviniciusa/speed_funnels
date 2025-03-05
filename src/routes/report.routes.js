@@ -6,6 +6,9 @@ const { authenticate } = require('../middlewares/auth.middleware');
 // Middleware de autenticação para todas as rotas
 router.use(authenticate);
 
+// Rota raiz para listar todos os relatórios
+router.get('/', reportController.listReports);
+
 // Rotas para dashboard
 router.get('/meta/dashboard', reportController.getMetaDashboard);
 router.get('/google/dashboard', reportController.getGoogleDashboard);
@@ -24,4 +27,4 @@ router.post('/:reportId/share', reportController.createPublicLink);
 router.get('/public/:publicId', reportController.getPublicReport);
 
 // Exportar rotas
-module.exports = router; 
+module.exports = router;

@@ -61,7 +61,16 @@ const Reports = () => {
     
     try {
       const response = await api.get('/api/reports');
-      setReports(response.data.data);
+      // Verificar se a resposta contém os dados esperados
+      if (response.data && Array.isArray(response.data)) {
+        setReports(response.data);
+      } else if (response.data && response.data.data && Array.isArray(response.data.data)) {
+        setReports(response.data.data);
+      } else {
+        // Se não tiver o formato esperado, inicializa como array vazio
+        console.warn('Formato de resposta inesperado:', response.data);
+        setReports([]);
+      }
     } catch (err) {
       console.error('Error fetching reports:', err);
       setError('Falha ao carregar os relatórios. Por favor, tente novamente.');
@@ -92,6 +101,14 @@ const Reports = () => {
       
       await api.post('/api/reports', payload);
       setOpenDialog(false);
+      // Resetar o formulário
+      setNewReportData({
+        name: '',
+        type: 'meta',
+        startDate: subDays(new Date(), 30),
+        endDate: new Date(),
+        description: ''
+      });
       fetchReports();
     } catch (err) {
       console.error('Error creating report:', err);
@@ -192,13 +209,19 @@ const Reports = () => {
                       <TableRow key={report.id}>
                         <TableCell>{report.name}</TableCell>
                         <TableCell>
-                          {report.type === 'meta' ? 'Meta Ads' : 'Google Analytics'}
+                          {report.type === 'meta' || (report.platforms && report.platforms.includes('meta')) 
+                            ? 'Meta Ads' 
+                            : 'Google Analytics'}
                         </TableCell>
                         <TableCell>
-                          {format(new Date(report.startDate), 'dd/MM/yyyy')} - {format(new Date(report.endDate), 'dd/MM/yyyy')}
+                          {report.startDate && report.endDate 
+                            ? `${format(new Date(report.startDate), 'dd/MM/yyyy')} - ${format(new Date(report.endDate), 'dd/MM/yyyy')}`
+                            : 'Período não definido'}
                         </TableCell>
                         <TableCell>
-                          {format(new Date(report.createdAt), 'dd/MM/yyyy HH:mm')}
+                          {report.createdAt 
+                            ? format(new Date(report.createdAt), 'dd/MM/yyyy HH:mm')
+                            : 'Data não disponível'}
                         </TableCell>
                         <TableCell>
                           <Tooltip title="Visualizar">

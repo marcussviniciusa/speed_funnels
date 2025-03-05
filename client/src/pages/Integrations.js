@@ -7,10 +7,14 @@ import {
   Button, 
   CircularProgress,
   Alert,
-  Snackbar
+  Snackbar,
+  Divider,
+  Tabs,
+  Tab
 } from '@mui/material';
 import { Link as RouterLink } from 'react-router-dom';
 import IntegrationSettings from '../components/settings/IntegrationSettings';
+import DirectMetaConnect from '../components/integration/DirectMetaConnect';
 import integrationService from '../services/integrationService';
 
 /**
@@ -22,6 +26,7 @@ const Integrations = () => {
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState(null);
   const [success, setSuccess] = useState(null);
+  const [activeTab, setActiveTab] = useState(0);
 
   // Carregar integrações existentes
   useEffect(() => {
@@ -123,6 +128,17 @@ const Integrations = () => {
     setSuccess(null);
   };
 
+  // Manipular mudança de tab
+  const handleTabChange = (event, newValue) => {
+    setActiveTab(newValue);
+  };
+
+  // Manipular sucesso na conexão direta com o Meta
+  const handleDirectMetaSuccess = (data) => {
+    setSuccess(`Conexão com Meta Ads realizada com sucesso para a conta ${data.accountName}`);
+    fetchIntegrations();
+  };
+
   return (
     <Container maxWidth="lg">
       <Box sx={{ py: 4 }}>
@@ -138,14 +154,32 @@ const Integrations = () => {
             <CircularProgress />
           </Box>
         ) : (
-          <Paper elevation={2} sx={{ p: 3, mt: 3 }}>
-            <IntegrationSettings 
-              integrations={integrations}
-              onSave={handleSaveIntegration}
-              onDelete={handleDeleteIntegration}
-              loading={saving}
-            />
-          </Paper>
+          <>
+            <Box sx={{ borderBottom: 1, borderColor: 'divider', mb: 3 }}>
+              <Tabs value={activeTab} onChange={handleTabChange} aria-label="integration tabs">
+                <Tab label="Integrações OAuth" />
+                <Tab label="Conexão Direta" />
+              </Tabs>
+            </Box>
+
+            {activeTab === 0 ? (
+              <Paper elevation={2} sx={{ p: 3 }}>
+                <IntegrationSettings 
+                  integrations={integrations}
+                  onSave={handleSaveIntegration}
+                  onDelete={handleDeleteIntegration}
+                  loading={saving}
+                />
+              </Paper>
+            ) : (
+              <Box>
+                <DirectMetaConnect 
+                  companyId="1" 
+                  onSuccess={handleDirectMetaSuccess}
+                />
+              </Box>
+            )}
+          </>
         )}
 
         <Box sx={{ mt: 4, display: 'flex', justifyContent: 'flex-end' }}>

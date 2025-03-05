@@ -1,0 +1,68 @@
+version: "3.7"
+
+services:
+  app:
+    image: ${REGISTRY_URL:-localhost}/speed-funnels:${TAG:-latest}
+    build:
+      context: .
+      dockerfile: Dockerfile
+    restart: unless-stopped
+    depends_on:
+      - db
+    environment:
+      - NODE_ENV=production
+      - DB_HOST=db
+      - DB_USER=${DB_USER:-postgres}
+      - DB_PASSWORD=${DB_PASSWORD:-postgres}
+      - DB_NAME=${DB_NAME:-speedfunnels}
+      - META_APP_ID=${META_APP_ID}
+      - META_APP_SECRET=${META_APP_SECRET}
+      - META_REDIRECT_URI=${META_REDIRECT_URI}
+      - GOOGLE_CLIENT_ID=${GOOGLE_CLIENT_ID}
+      - GOOGLE_CLIENT_SECRET=${GOOGLE_CLIENT_SECRET}
+      - GOOGLE_REDIRECT_URI=${GOOGLE_REDIRECT_URI}
+      - JWT_SECRET=${JWT_SECRET:-default_jwt_secret}
+    networks:
+      - internal
+      - network_public
+    deploy:
+      placement:
+        constraints:
+          - node.role == manager
+      labels:
+        - traefik.enable=true
+        - traefik.docker.network=network_public
+        - traefik.http.routers.speedfunnels.rule=Host(`${DOMAIN_NAME}`)
+        - traefik.http.routers.speedfunnels.entrypoints=websecure
+        - traefik.http.routers.speedfunnels.tls=true
+        - traefik.http.routers.speedfunnels.tls.certresolver=letsencryptresolver
+        - traefik.http.services.speedfunnels.loadbalancer.server.port=3000
+
+  db:
+    image: postgres:14-alpine
+    restart: unless-stopped
+    volumes:
+      - db-data:/var/lib/postgresql/data
+    environment:
+      - POSTGRES_USER=${DB_USER:-postgres}
+      - POSTGRES_PASSWORD=${DB_PASSWORD:-postgres}
+      - POSTGRES_DB=${DB_NAME:-speedfunnels}
+    networks:
+      - internal
+    deploy:
+      placement:
+        constraints:
+          - node.role == manager
+      labels:
+        - traefik.enable=false
+
+networks:
+  internal:
+  network_public:
+    external: true
+    name: network_public
+
+volumes:
+  db-data:
+    external: true
+    name: speedfunnels_db_data

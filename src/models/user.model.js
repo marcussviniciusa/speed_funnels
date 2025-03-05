@@ -62,6 +62,10 @@ module.exports = (sequelize) => {
       foreignKey: 'userId',
       as: 'companies',
     });
+    User.hasMany(models.ApiConnection, {
+      foreignKey: 'userId',
+      as: 'apiConnections',
+    });
   };
 
   return User;
