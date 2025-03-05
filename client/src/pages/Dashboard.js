@@ -79,15 +79,17 @@ const Dashboard = () => {
       const formattedStartDate = format(startDate, 'yyyy-MM-dd');
       const formattedEndDate = format(endDate, 'yyyy-MM-dd');
       
-      const endpoint = platform === 'meta' 
-        ? `/api/reports/meta/dashboard?startDate=${formattedStartDate}&endDate=${formattedEndDate}`
-        : `/api/reports/google/dashboard?startDate=${formattedStartDate}&endDate=${formattedEndDate}`;
+      const response = await api.get(`/api/dashboard/${platform}`, {
+        params: {
+          startDate: formattedStartDate,
+          endDate: formattedEndDate
+        }
+      });
       
-      const response = await api.get(endpoint);
-      setData(response.data.data);
+      setData(response.data);
     } catch (err) {
-      console.error('Error fetching dashboard data:', err);
-      setError('Falha ao carregar os dados do dashboard. Por favor, tente novamente.');
+      console.error('Erro ao buscar dados:', err);
+      setError('Não foi possível carregar os dados. Por favor, tente novamente.');
     } finally {
       setLoading(false);
     }
@@ -113,217 +115,268 @@ const Dashboard = () => {
     fetchDashboardData();
   };
 
-  // Render Meta dashboard
   const renderMetaDashboard = () => {
     if (!data) return null;
 
-    // Prepare data for charts
-    const campaignData = {
-      labels: data.campaigns.map(c => c.name),
+    const { impressions, clicks, spend, ctr, cpc, conversions } = data;
+
+    const chartData = {
+      labels: impressions.map(item => item.date),
       datasets: [
         {
-          label: 'Gasto (R$)',
-          data: data.campaigns.map(c => c.spend),
-          backgroundColor: 'rgba(54, 162, 235, 0.5)',
-          borderColor: 'rgba(54, 162, 235, 1)',
-          borderWidth: 1,
+          label: 'Impressões',
+          data: impressions.map(item => item.value),
+          borderColor: 'rgba(75, 192, 192, 1)',
+          backgroundColor: 'rgba(75, 192, 192, 0.2)',
+          tension: 0.4
         },
         {
           label: 'Cliques',
-          data: data.campaigns.map(c => c.clicks),
-          backgroundColor: 'rgba(255, 99, 132, 0.5)',
-          borderColor: 'rgba(255, 99, 132, 1)',
-          borderWidth: 1,
+          data: clicks.map(item => item.value),
+          borderColor: 'rgba(153, 102, 255, 1)',
+          backgroundColor: 'rgba(153, 102, 255, 0.2)',
+          tension: 0.4
+        }
+      ]
+    };
+
+    const conversionData = {
+      labels: conversions.map(item => item.date),
+      datasets: [
+        {
+          label: 'Conversões',
+          data: conversions.map(item => item.value),
+          backgroundColor: 'rgba(255, 159, 64, 0.7)',
         }
       ]
     };
 
     return (
       <>
-        <Grid container spacing={3}>
-          <Grid item xs={12} md={3}>
+        <Grid container spacing={3} sx={{ mb: 4 }}>
+          <Grid item xs={12} md={4}>
             <Card>
               <CardContent>
-                <Typography color="textSecondary" gutterBottom>
-                  Gasto Total
+                <Typography variant="subtitle2" color="text.secondary" gutterBottom>
+                  Impressões Totais
                 </Typography>
-                <Typography variant="h4">
-                  R$ {data.summary.spend.toFixed(2)}
+                <Typography variant="h4" component="div">
+                  {impressions.reduce((acc, curr) => acc + curr.value, 0).toLocaleString()}
                 </Typography>
               </CardContent>
             </Card>
           </Grid>
-          <Grid item xs={12} md={3}>
+          <Grid item xs={12} md={4}>
             <Card>
               <CardContent>
-                <Typography color="textSecondary" gutterBottom>
-                  Impressões
+                <Typography variant="subtitle2" color="text.secondary" gutterBottom>
+                  Cliques Totais
                 </Typography>
-                <Typography variant="h4">
-                  {data.summary.impressions.toLocaleString()}
+                <Typography variant="h4" component="div">
+                  {clicks.reduce((acc, curr) => acc + curr.value, 0).toLocaleString()}
                 </Typography>
               </CardContent>
             </Card>
           </Grid>
-          <Grid item xs={12} md={3}>
+          <Grid item xs={12} md={4}>
             <Card>
               <CardContent>
-                <Typography color="textSecondary" gutterBottom>
-                  Cliques
+                <Typography variant="subtitle2" color="text.secondary" gutterBottom>
+                  Investimento Total
                 </Typography>
-                <Typography variant="h4">
-                  {data.summary.clicks.toLocaleString()}
-                </Typography>
-              </CardContent>
-            </Card>
-          </Grid>
-          <Grid item xs={12} md={3}>
-            <Card>
-              <CardContent>
-                <Typography color="textSecondary" gutterBottom>
-                  CTR
-                </Typography>
-                <Typography variant="h4">
-                  {(data.summary.ctr * 100).toFixed(2)}%
+                <Typography variant="h4" component="div">
+                  R$ {spend.reduce((acc, curr) => acc + curr.value, 0).toLocaleString(undefined, {minimumFractionDigits: 2, maximumFractionDigits: 2})}
                 </Typography>
               </CardContent>
             </Card>
           </Grid>
         </Grid>
 
-        <Card sx={{ mt: 4 }}>
-          <CardHeader title="Desempenho por Campanha" />
-          <Divider />
-          <CardContent>
-            <Box sx={{ height: 300 }}>
-              <Bar 
-                data={campaignData} 
-                options={{
-                  responsive: true,
-                  maintainAspectRatio: false,
-                  scales: {
-                    y: {
-                      beginAtZero: true
+        <Grid container spacing={3}>
+          <Grid item xs={12} md={8}>
+            <Card>
+              <CardHeader title="Desempenho ao Longo do Tempo" />
+              <Divider />
+              <CardContent>
+                <Line 
+                  data={chartData} 
+                  options={{
+                    responsive: true,
+                    maintainAspectRatio: false,
+                    scales: {
+                      y: {
+                        beginAtZero: true
+                      }
                     }
-                  }
-                }} 
-              />
-            </Box>
-          </CardContent>
-        </Card>
+                  }}
+                  height={300}
+                />
+              </CardContent>
+            </Card>
+          </Grid>
+          <Grid item xs={12} md={4}>
+            <Card>
+              <CardHeader title="Conversões" />
+              <Divider />
+              <CardContent>
+                <Bar 
+                  data={conversionData} 
+                  options={{
+                    responsive: true,
+                    maintainAspectRatio: false,
+                    scales: {
+                      y: {
+                        beginAtZero: true
+                      }
+                    }
+                  }}
+                  height={300}
+                />
+              </CardContent>
+            </Card>
+          </Grid>
+        </Grid>
       </>
     );
   };
 
-  // Render Google dashboard
   const renderGoogleDashboard = () => {
     if (!data) return null;
 
-    // Prepare data for charts
-    const sourceData = {
-      labels: data.data.map(d => d.dimension),
+    const { sessions, pageviews, users, bounceRate, avgSessionDuration, trafficSources } = data;
+
+    const chartData = {
+      labels: sessions.map(item => item.date),
       datasets: [
         {
           label: 'Sessões',
-          data: data.data.map(d => d.sessions),
-          backgroundColor: 'rgba(75, 192, 192, 0.5)',
+          data: sessions.map(item => item.value),
           borderColor: 'rgba(75, 192, 192, 1)',
-          borderWidth: 1,
+          backgroundColor: 'rgba(75, 192, 192, 0.2)',
+          tension: 0.4
         },
         {
-          label: 'Usuários',
-          data: data.data.map(d => d.users),
-          backgroundColor: 'rgba(153, 102, 255, 0.5)',
+          label: 'Visualizações de Página',
+          data: pageviews.map(item => item.value),
           borderColor: 'rgba(153, 102, 255, 1)',
-          borderWidth: 1,
+          backgroundColor: 'rgba(153, 102, 255, 0.2)',
+          tension: 0.4
+        }
+      ]
+    };
+
+    const trafficSourcesData = {
+      labels: trafficSources.map(item => item.source),
+      datasets: [
+        {
+          label: 'Fontes de Tráfego',
+          data: trafficSources.map(item => item.sessions),
+          backgroundColor: [
+            'rgba(255, 99, 132, 0.7)',
+            'rgba(54, 162, 235, 0.7)',
+            'rgba(255, 206, 86, 0.7)',
+            'rgba(75, 192, 192, 0.7)',
+            'rgba(153, 102, 255, 0.7)',
+          ],
         }
       ]
     };
 
     return (
       <>
-        <Grid container spacing={3}>
-          <Grid item xs={12} md={3}>
+        <Grid container spacing={3} sx={{ mb: 4 }}>
+          <Grid item xs={12} md={4}>
             <Card>
               <CardContent>
-                <Typography color="textSecondary" gutterBottom>
-                  Sessões
+                <Typography variant="subtitle2" color="text.secondary" gutterBottom>
+                  Usuários Totais
                 </Typography>
-                <Typography variant="h4">
-                  {data.summary.sessions.toLocaleString()}
+                <Typography variant="h4" component="div">
+                  {users.reduce((acc, curr) => acc + curr.value, 0).toLocaleString()}
                 </Typography>
               </CardContent>
             </Card>
           </Grid>
-          <Grid item xs={12} md={3}>
+          <Grid item xs={12} md={4}>
             <Card>
               <CardContent>
-                <Typography color="textSecondary" gutterBottom>
-                  Usuários
+                <Typography variant="subtitle2" color="text.secondary" gutterBottom>
+                  Taxa de Rejeição Média
                 </Typography>
-                <Typography variant="h4">
-                  {data.summary.users.toLocaleString()}
+                <Typography variant="h4" component="div">
+                  {(bounceRate.reduce((acc, curr) => acc + curr.value, 0) / bounceRate.length).toFixed(2)}%
                 </Typography>
               </CardContent>
             </Card>
           </Grid>
-          <Grid item xs={12} md={3}>
+          <Grid item xs={12} md={4}>
             <Card>
               <CardContent>
-                <Typography color="textSecondary" gutterBottom>
-                  Visualizações de Página
-                </Typography>
-                <Typography variant="h4">
-                  {data.summary.pageviews.toLocaleString()}
-                </Typography>
-              </CardContent>
-            </Card>
-          </Grid>
-          <Grid item xs={12} md={3}>
-            <Card>
-              <CardContent>
-                <Typography color="textSecondary" gutterBottom>
+                <Typography variant="subtitle2" color="text.secondary" gutterBottom>
                   Duração Média da Sessão
                 </Typography>
-                <Typography variant="h4">
-                  {Math.floor(data.summary.avgSessionDuration / 60)}m {data.summary.avgSessionDuration % 60}s
+                <Typography variant="h4" component="div">
+                  {Math.floor(avgSessionDuration.reduce((acc, curr) => acc + curr.value, 0) / avgSessionDuration.length)} seg
                 </Typography>
               </CardContent>
             </Card>
           </Grid>
         </Grid>
 
-        <Card sx={{ mt: 4 }}>
-          <CardHeader title="Desempenho por Fonte" />
-          <Divider />
-          <CardContent>
-            <Box sx={{ height: 300 }}>
-              <Bar 
-                data={sourceData} 
-                options={{
-                  responsive: true,
-                  maintainAspectRatio: false,
-                  scales: {
-                    y: {
-                      beginAtZero: true
+        <Grid container spacing={3}>
+          <Grid item xs={12} md={8}>
+            <Card>
+              <CardHeader title="Desempenho ao Longo do Tempo" />
+              <Divider />
+              <CardContent>
+                <Line 
+                  data={chartData} 
+                  options={{
+                    responsive: true,
+                    maintainAspectRatio: false,
+                    scales: {
+                      y: {
+                        beginAtZero: true
+                      }
                     }
-                  }
-                }} 
-              />
-            </Box>
-          </CardContent>
-        </Card>
+                  }}
+                  height={300}
+                />
+              </CardContent>
+            </Card>
+          </Grid>
+          <Grid item xs={12} md={4}>
+            <Card>
+              <CardHeader title="Fontes de Tráfego" />
+              <Divider />
+              <CardContent>
+                <Bar 
+                  data={trafficSourcesData} 
+                  options={{
+                    responsive: true,
+                    maintainAspectRatio: false,
+                    indexAxis: 'y',
+                    scales: {
+                      x: {
+                        beginAtZero: true
+                      }
+                    }
+                  }}
+                  height={300}
+                />
+              </CardContent>
+            </Card>
+          </Grid>
+        </Grid>
       </>
     );
   };
 
   return (
     <Box>
-      <Box sx={{ mb: 4, display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-        <Typography variant="h4" component="h1" gutterBottom>
-          Dashboard
-        </Typography>
-      </Box>
+      <Typography variant="h4" component="h1" gutterBottom>
+        Dashboard
+      </Typography>
 
       {error && (
         <Alert severity="error" sx={{ mb: 3 }}>
@@ -347,70 +400,71 @@ const Dashboard = () => {
       )}
 
       {dashboardTab === 0 || !hasActiveIntegrations ? (
-        <Card sx={{ mb: 4 }}>
-          <CardContent>
-            <Box component="form" onSubmit={handleSubmit}>
-              <Grid container spacing={2} alignItems="center">
-                <Grid item xs={12} md={3}>
-                  <FormControl fullWidth>
-                    <InputLabel id="platform-select-label">Plataforma</InputLabel>
-                    <Select
-                      labelId="platform-select-label"
-                      id="platform-select"
-                      value={platform}
-                      label="Plataforma"
-                      onChange={(e) => setPlatform(e.target.value)}
+        <Box>
+          <Card sx={{ mb: 4 }}>
+            <CardContent>
+              <Box component="form" onSubmit={handleSubmit}>
+                <Grid container spacing={2} alignItems="center">
+                  <Grid item xs={12} md={3}>
+                    <FormControl fullWidth>
+                      <InputLabel id="platform-select-label">Plataforma</InputLabel>
+                      <Select
+                        labelId="platform-select-label"
+                        id="platform-select"
+                        value={platform}
+                        label="Plataforma"
+                        onChange={(e) => setPlatform(e.target.value)}
+                      >
+                        <MenuItem value="meta">Meta Ads</MenuItem>
+                        <MenuItem value="google">Google Analytics</MenuItem>
+                      </Select>
+                    </FormControl>
+                  </Grid>
+                  <Grid item xs={12} md={3}>
+                    <LocalizationProvider dateAdapter={AdapterDateFns} adapterLocale={ptBR}>
+                      <DatePicker
+                        label="Data de Início"
+                        value={startDate}
+                        onChange={(newValue) => setStartDate(newValue)}
+                        slotProps={{ textField: { fullWidth: true } }}
+                      />
+                    </LocalizationProvider>
+                  </Grid>
+                  <Grid item xs={12} md={3}>
+                    <LocalizationProvider dateAdapter={AdapterDateFns} adapterLocale={ptBR}>
+                      <DatePicker
+                        label="Data de Fim"
+                        value={endDate}
+                        onChange={(newValue) => setEndDate(newValue)}
+                        slotProps={{ textField: { fullWidth: true } }}
+                      />
+                    </LocalizationProvider>
+                  </Grid>
+                  <Grid item xs={12} md={3}>
+                    <Button
+                      type="submit"
+                      variant="contained"
+                      fullWidth
+                      disabled={loading}
+                      sx={{ height: '56px' }}
                     >
-                      <MenuItem value="meta">Meta Ads</MenuItem>
-                      <MenuItem value="google">Google Analytics</MenuItem>
-                    </Select>
-                  </FormControl>
+                      {loading ? <CircularProgress size={24} /> : 'Atualizar Dados'}
+                    </Button>
+                  </Grid>
                 </Grid>
-                <Grid item xs={12} md={3}>
-                  <LocalizationProvider dateAdapter={AdapterDateFns} adapterLocale={ptBR}>
-                    <DatePicker
-                      label="Data de Início"
-                      value={startDate}
-                      onChange={(newValue) => setStartDate(newValue)}
-                      slotProps={{ textField: { fullWidth: true } }}
-                    />
-                  </LocalizationProvider>
-                </Grid>
-                <Grid item xs={12} md={3}>
-                  <LocalizationProvider dateAdapter={AdapterDateFns} adapterLocale={ptBR}>
-                    <DatePicker
-                      label="Data de Fim"
-                      value={endDate}
-                      onChange={(newValue) => setEndDate(newValue)}
-                      slotProps={{ textField: { fullWidth: true } }}
-                    />
-                  </LocalizationProvider>
-                </Grid>
-                <Grid item xs={12} md={3}>
-                  <Button
-                    type="submit"
-                    variant="contained"
-                    fullWidth
-                    disabled={loading}
-                    sx={{ height: '56px' }}
-                  >
-                    {loading ? <CircularProgress size={24} /> : 'Atualizar Dados'}
-                  </Button>
-                </Grid>
-              </Grid>
-            </Box>
-          </CardContent>
-        </Card>
+              </Box>
+            </CardContent>
+          </Card>
 
-        {loading ? (
-          <Box sx={{ display: 'flex', justifyContent: 'center', my: 8 }}>
-            <CircularProgress />
-          </Box>
-        ) : (
-          platform === 'meta' ? renderMetaDashboard() : renderGoogleDashboard()
-        )
+          {loading ? (
+            <Box sx={{ display: 'flex', justifyContent: 'center', my: 8 }}>
+              <CircularProgress />
+            </Box>
+          ) : (
+            platform === 'meta' ? renderMetaDashboard() : renderGoogleDashboard()
+          )}
+        </Box>
       ) : (
-        // Dashboard de métricas de marketing (integrações)
         <MetricsDashboard />
       )}
     </Box>
