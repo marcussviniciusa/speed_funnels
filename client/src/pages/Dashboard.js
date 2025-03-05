@@ -13,7 +13,10 @@ import {
   Select,
   MenuItem,
   CircularProgress,
-  Alert
+  Alert,
+  Paper,
+  Tabs,
+  Tab
 } from '@mui/material';
 import { DatePicker } from '@mui/x-date-pickers/DatePicker';
 import { LocalizationProvider } from '@mui/x-date-pickers/LocalizationProvider';
@@ -34,6 +37,8 @@ import {
 } from 'chart.js';
 import { Line, Bar } from 'react-chartjs-2';
 import api from '../services/api';
+import integrationService from '../services/integrationService';
+import MetricsDashboard from '../components/dashboard/MetricsDashboard';
 
 // Register ChartJS components
 ChartJS.register(
@@ -55,7 +60,17 @@ const Dashboard = () => {
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState('');
   const [data, setData] = useState(null);
+  const [integrations, setIntegrations] = useState({});
+  const [hasActiveIntegrations, setHasActiveIntegrations] = useState(false);
+  const [dashboardTab, setDashboardTab] = useState(0);
 
+  // Buscar dados do dashboard
+  useEffect(() => {
+    fetchDashboardData();
+    fetchIntegrations();
+  }, [platform]);
+
+  // Buscar dados do dashboard
   const fetchDashboardData = async () => {
     setLoading(true);
     setError('');
@@ -78,9 +93,20 @@ const Dashboard = () => {
     }
   };
 
-  useEffect(() => {
-    fetchDashboardData();
-  }, [platform]); // Fetch data when platform changes
+  // Buscar integrações
+  const fetchIntegrations = async () => {
+    try {
+      const response = await integrationService.getIntegrations();
+      const integrations = response.data.data || {};
+      setIntegrations(integrations);
+      
+      // Verificar se há integrações ativas
+      const hasActive = Object.values(integrations).some(integration => integration && integration.isActive);
+      setHasActiveIntegrations(hasActive);
+    } catch (err) {
+      console.error('Erro ao buscar integrações:', err);
+    }
+  };
 
   const handleSubmit = (e) => {
     e.preventDefault();
@@ -299,73 +325,93 @@ const Dashboard = () => {
         </Typography>
       </Box>
 
-      <Card sx={{ mb: 4 }}>
-        <CardContent>
-          <Box component="form" onSubmit={handleSubmit}>
-            <Grid container spacing={2} alignItems="center">
-              <Grid item xs={12} md={3}>
-                <FormControl fullWidth>
-                  <InputLabel id="platform-select-label">Plataforma</InputLabel>
-                  <Select
-                    labelId="platform-select-label"
-                    id="platform-select"
-                    value={platform}
-                    label="Plataforma"
-                    onChange={(e) => setPlatform(e.target.value)}
-                  >
-                    <MenuItem value="meta">Meta Ads</MenuItem>
-                    <MenuItem value="google">Google Analytics</MenuItem>
-                  </Select>
-                </FormControl>
-              </Grid>
-              <Grid item xs={12} md={3}>
-                <LocalizationProvider dateAdapter={AdapterDateFns} adapterLocale={ptBR}>
-                  <DatePicker
-                    label="Data de Início"
-                    value={startDate}
-                    onChange={(newValue) => setStartDate(newValue)}
-                    slotProps={{ textField: { fullWidth: true } }}
-                  />
-                </LocalizationProvider>
-              </Grid>
-              <Grid item xs={12} md={3}>
-                <LocalizationProvider dateAdapter={AdapterDateFns} adapterLocale={ptBR}>
-                  <DatePicker
-                    label="Data de Fim"
-                    value={endDate}
-                    onChange={(newValue) => setEndDate(newValue)}
-                    slotProps={{ textField: { fullWidth: true } }}
-                  />
-                </LocalizationProvider>
-              </Grid>
-              <Grid item xs={12} md={3}>
-                <Button
-                  type="submit"
-                  variant="contained"
-                  fullWidth
-                  disabled={loading}
-                  sx={{ height: '56px' }}
-                >
-                  {loading ? <CircularProgress size={24} /> : 'Atualizar Dados'}
-                </Button>
-              </Grid>
-            </Grid>
-          </Box>
-        </CardContent>
-      </Card>
-
       {error && (
-        <Alert severity="error" sx={{ mb: 4 }}>
+        <Alert severity="error" sx={{ mb: 3 }}>
           {error}
         </Alert>
       )}
 
-      {loading ? (
-        <Box sx={{ display: 'flex', justifyContent: 'center', my: 8 }}>
-          <CircularProgress />
-        </Box>
+      {hasActiveIntegrations && (
+        <Paper sx={{ mb: 3 }}>
+          <Tabs
+            value={dashboardTab}
+            onChange={(event, newValue) => setDashboardTab(newValue)}
+            aria-label="dashboard tabs"
+            variant="fullWidth"
+            sx={{ borderBottom: 1, borderColor: 'divider' }}
+          >
+            <Tab label="Visão Geral" />
+            <Tab label="Métricas de Marketing" />
+          </Tabs>
+        </Paper>
+      )}
+
+      {dashboardTab === 0 || !hasActiveIntegrations ? (
+        <Card sx={{ mb: 4 }}>
+          <CardContent>
+            <Box component="form" onSubmit={handleSubmit}>
+              <Grid container spacing={2} alignItems="center">
+                <Grid item xs={12} md={3}>
+                  <FormControl fullWidth>
+                    <InputLabel id="platform-select-label">Plataforma</InputLabel>
+                    <Select
+                      labelId="platform-select-label"
+                      id="platform-select"
+                      value={platform}
+                      label="Plataforma"
+                      onChange={(e) => setPlatform(e.target.value)}
+                    >
+                      <MenuItem value="meta">Meta Ads</MenuItem>
+                      <MenuItem value="google">Google Analytics</MenuItem>
+                    </Select>
+                  </FormControl>
+                </Grid>
+                <Grid item xs={12} md={3}>
+                  <LocalizationProvider dateAdapter={AdapterDateFns} adapterLocale={ptBR}>
+                    <DatePicker
+                      label="Data de Início"
+                      value={startDate}
+                      onChange={(newValue) => setStartDate(newValue)}
+                      slotProps={{ textField: { fullWidth: true } }}
+                    />
+                  </LocalizationProvider>
+                </Grid>
+                <Grid item xs={12} md={3}>
+                  <LocalizationProvider dateAdapter={AdapterDateFns} adapterLocale={ptBR}>
+                    <DatePicker
+                      label="Data de Fim"
+                      value={endDate}
+                      onChange={(newValue) => setEndDate(newValue)}
+                      slotProps={{ textField: { fullWidth: true } }}
+                    />
+                  </LocalizationProvider>
+                </Grid>
+                <Grid item xs={12} md={3}>
+                  <Button
+                    type="submit"
+                    variant="contained"
+                    fullWidth
+                    disabled={loading}
+                    sx={{ height: '56px' }}
+                  >
+                    {loading ? <CircularProgress size={24} /> : 'Atualizar Dados'}
+                  </Button>
+                </Grid>
+              </Grid>
+            </Box>
+          </CardContent>
+        </Card>
+
+        {loading ? (
+          <Box sx={{ display: 'flex', justifyContent: 'center', my: 8 }}>
+            <CircularProgress />
+          </Box>
+        ) : (
+          platform === 'meta' ? renderMetaDashboard() : renderGoogleDashboard()
+        )
       ) : (
-        platform === 'meta' ? renderMetaDashboard() : renderGoogleDashboard()
+        // Dashboard de métricas de marketing (integrações)
+        <MetricsDashboard />
       )}
     </Box>
   );
