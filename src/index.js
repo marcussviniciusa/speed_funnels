@@ -25,88 +25,12 @@ app.use(helmet());
 app.use(morgan('dev'));
 app.use(express.json());
 
+// Servir arquivos estáticos do frontend
+app.use(express.static(path.join(__dirname, '../client/build')));
+
 // Rota raiz
 app.get('/', (req, res) => {
-  res.send(`
-    <html>
-      <head>
-        <title>Speed Funnels API</title>
-        <style>
-          body {
-            font-family: Arial, sans-serif;
-            line-height: 1.6;
-            max-width: 800px;
-            margin: 0 auto;
-            padding: 20px;
-            color: #333;
-          }
-          h1 {
-            color: #2196f3;
-            border-bottom: 2px solid #eee;
-            padding-bottom: 10px;
-          }
-          h2 {
-            color: #0d47a1;
-            margin-top: 30px;
-          }
-          code {
-            background: #f5f5f5;
-            padding: 2px 5px;
-            border-radius: 3px;
-            font-family: monospace;
-          }
-          .endpoint {
-            margin-bottom: 15px;
-            padding: 10px;
-            background: #f9f9f9;
-            border-left: 4px solid #2196f3;
-          }
-          .method {
-            font-weight: bold;
-            color: #0d47a1;
-          }
-        </style>
-      </head>
-      <body>
-        <h1>Speed Funnels API</h1>
-        <p>Bem-vindo à API do Speed Funnels, uma plataforma para análise e geração de relatórios de marketing digital.</p>
-        
-        <h2>Endpoints Disponíveis</h2>
-        
-        <div class="endpoint">
-          <p><span class="method">POST</span> <code>/api/auth/login</code> - Autenticação de usuário</p>
-        </div>
-        
-        <div class="endpoint">
-          <p><span class="method">GET</span> <code>/api/users/me</code> - Dados do usuário autenticado</p>
-        </div>
-        
-        <div class="endpoint">
-          <p><span class="method">GET</span> <code>/api/users/profile</code> - Perfil do usuário autenticado</p>
-        </div>
-        
-        <div class="endpoint">
-          <p><span class="method">GET</span> <code>/api/reports/list</code> - Lista de relatórios</p>
-        </div>
-        
-        <div class="endpoint">
-          <p><span class="method">GET</span> <code>/api/reports/:reportId</code> - Detalhes de um relatório específico</p>
-        </div>
-        
-        <div class="endpoint">
-          <p><span class="method">GET</span> <code>/api/reports/meta/dashboard</code> - Dashboard de dados do Meta Ads</p>
-        </div>
-        
-        <div class="endpoint">
-          <p><span class="method">GET</span> <code>/api/reports/google/dashboard</code> - Dashboard de dados do Google Analytics</p>
-        </div>
-        
-        <p>Para mais informações, consulte a documentação completa da API.</p>
-        
-        <p>Versão: 1.0.0</p>
-      </body>
-    </html>
-  `);
+  res.sendFile(path.join(__dirname, '../client/build', 'index.html'));
 });
 
 // Rotas
@@ -117,6 +41,11 @@ app.use('/api/reports', reportRoutes);
 app.use('/api/integrations', integrationRoutes);
 app.use('/api/schedules', scheduleRoutes);
 app.use('/api/metrics', metricsRoutes);
+
+// Rota para servir o frontend React em qualquer outra rota
+app.get('*', (req, res) => {
+  res.sendFile(path.join(__dirname, '../client/build', 'index.html'));
+});
 
 // Tratamento de erros
 app.use((err, req, res, next) => {

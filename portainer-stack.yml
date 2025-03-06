@@ -15,6 +15,7 @@ services:
       - DB_USER=${DB_USER:-postgres}
       - DB_PASSWORD=${DB_PASSWORD:-postgres}
       - DB_NAME=${DB_NAME:-speedfunnels}
+      - DB_SSL=${DB_SSL:-false}
       - META_APP_ID=${META_APP_ID}
       - META_APP_SECRET=${META_APP_SECRET}
       - META_REDIRECT_URI=${META_REDIRECT_URI}
@@ -36,7 +37,7 @@ services:
         - traefik.http.routers.speedfunnels.entrypoints=websecure
         - traefik.http.routers.speedfunnels.tls=true
         - traefik.http.routers.speedfunnels.tls.certresolver=letsencryptresolver
-        - traefik.http.services.speedfunnels.loadbalancer.server.port=3000
+        - traefik.http.services.speedfunnels.loadbalancer.server.port=3001
 
   db:
     image: postgres:14-alpine

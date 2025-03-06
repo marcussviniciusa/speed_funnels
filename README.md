@@ -105,7 +105,18 @@ Ou faça o deploy manualmente no Portainer usando o arquivo `portainer-stack.yml
 
 Para mais detalhes, consulte o [Guia de Deploy com YAML no Portainer](PORTAINER-YAML-DEPLOY.md).
 
-#### Opção 3: Deploy Manual
+#### Opção 3: Publicar no Docker Hub e Deploy no Portainer
+
+1. Publique a imagem no Docker Hub:
+   ```bash
+   ./scripts/publish-dockerhub.sh <DOCKERHUB_USERNAME> [TAG]
+   ```
+
+2. No Portainer, crie um stack usando o arquivo `portainer-stack.yml` e defina a variável `REGISTRY_URL` com seu nome de usuário do Docker Hub.
+
+Para mais detalhes, consulte o [Guia de Publicação no Docker Hub](docs/dockerhub-deploy-guide.md).
+
+#### Opção 4: Deploy Manual
 
 1. Configure as variáveis de ambiente:
    ```bash
@@ -136,6 +147,13 @@ speed_funnels/
 └── traefik.yml          # Configuração principal do Traefik
 ```
 
+## Documentação
+
+- [Guia de Deploy com Portainer](DEPLOY-STACK.md)
+- [Guia de Deploy com YAML no Portainer](PORTAINER-YAML-DEPLOY.md)
+- [Guia de Publicação no Docker Hub](DOCKERHUB-DEPLOY.md)
+- [Guia de Solução de Problemas](docs/troubleshooting.md)
+
 ## Scripts Utilitários
 
 - `scripts/generate-traefik-password.sh`: Gera hash de senha para o Traefik
@@ -143,6 +161,11 @@ speed_funnels/
 - `scripts/db-backup.sh`: Backup e restauração do banco de dados
 - `scripts/test-direct-meta-integration.js`: Testa integração direta com Meta Ads
 - `scripts/test-meta-metrics.js`: Testa recuperação de métricas do Meta Ads
+- `scripts/publish-dockerhub.sh`: Publica a imagem no Docker Hub
+- `scripts/update-stack.sh`: Atualiza o stack no Portainer com uma nova tag
+- `scripts/fix-and-update.sh`: Corrige problemas comuns e atualiza a imagem no Docker Hub
+- `scripts/fix-db-ssl.sh`: Corrige problemas de SSL no banco de dados
+- `scripts/update-frontend-fix.sh`: Corrige problemas de frontend e atualiza a imagem Docker
 
 ## Integração com Meta Ads
 
