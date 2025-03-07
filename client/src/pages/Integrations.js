@@ -14,7 +14,8 @@ import {
 } from '@mui/material';
 import { Link as RouterLink } from 'react-router-dom';
 import IntegrationSettings from '../components/settings/IntegrationSettings';
-import DirectMetaConnect from '../components/integration/DirectMetaConnect';
+import FacebookIntegration from '../components/integration/FacebookIntegration';
+import FacebookSDK from '../components/integration/FacebookSDK';
 import integrationService from '../services/integrationService';
 
 /**
@@ -31,6 +32,30 @@ const Integrations = () => {
   // Carregar integrações existentes
   useEffect(() => {
     fetchIntegrations();
+    
+    // Verificar parâmetros da URL para mensagens de sucesso ou erro
+    const queryParams = new URLSearchParams(window.location.search);
+    const successParam = queryParams.get('success');
+    const errorParam = queryParams.get('error');
+    
+    if (successParam) {
+      setSuccess(decodeURIComponent(successParam));
+      
+      // Remover parâmetros da URL sem recarregar a página
+      const newUrl = window.location.pathname;
+      window.history.replaceState({}, document.title, newUrl);
+      
+      // Recarregar integrações para mostrar a nova conexão
+      fetchIntegrations();
+    }
+    
+    if (errorParam) {
+      setError(decodeURIComponent(errorParam));
+      
+      // Remover parâmetros da URL sem recarregar a página
+      const newUrl = window.location.pathname;
+      window.history.replaceState({}, document.title, newUrl);
+    }
   }, []);
 
   // Buscar integrações da API
@@ -173,9 +198,18 @@ const Integrations = () => {
               </Paper>
             ) : (
               <Box>
-                <DirectMetaConnect 
+                <FacebookIntegration 
                   companyId="1" 
-                  onSuccess={handleDirectMetaSuccess}
+                  onIntegrationSuccess={handleDirectMetaSuccess}
+                />
+                <Box sx={{ my: 4 }}>
+                  <Divider />
+                </Box>
+                <IntegrationSettings 
+                  integrations={integrations}
+                  onSave={handleSaveIntegration}
+                  onDelete={handleDeleteIntegration}
+                  loading={saving}
                 />
               </Box>
             )}

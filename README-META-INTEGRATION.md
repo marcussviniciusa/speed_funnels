@@ -14,108 +14,127 @@ Este documento descreve a integração do Speed Funnels com a plataforma Meta Ad
 
 ## Arquitetura
 
-A integração com o Meta Ads foi implementada seguindo uma arquitetura modular:
+A integração com o Meta Ads foi implementada seguindo uma arquitetura de múltiplas camadas:
 
-1. **Backend (Node.js/Express)**:
-   - Controlador de integração (`integration.controller.js`)
-   - Rotas de integração (`integration.routes.js`)
-   - Serviços de métricas e relatórios
+1. **Interface do Usuário**: Componentes React para interação com o usuário
+   - `FacebookIntegration.jsx`: Página principal para conexão e gerenciamento da integração
+   - `FacebookSDK.jsx`: Componente para carregamento e gerenciamento do SDK do Facebook
+   - `FacebookLoginButton.jsx`: Botão personalizado para login com Facebook
 
-2. **Frontend (React)**:
-   - Componente de integração OAuth
-   - Componente de conexão direta com token (`DirectMetaConnect.js`)
-   - Visualização de métricas e relatórios
+2. **Camada de Serviço**: Serviços para comunicação com a API do Meta
+   - `metaService.js`: Serviço para autenticação e comunicação com a Graph API
+   - `tokenService.js`: Serviço para gerenciamento seguro de tokens
+   - `oauthStateService.js`: Serviço para gerenciamento do estado OAuth
 
-3. **Scripts de Utilidade**:
-   - `connect-meta.js`: Script interativo para conexão com o Meta Ads
-   - `test-meta-api.js`: Utilitário para testar a API do Meta Ads
-   - `test-direct-meta-integration.js`: Teste de integração direta com token
-   - `test-meta-metrics.js`: Teste de obtenção de métricas
+3. **Controladores**: Lógica de negócios para processamento de requisições
+   - `integration.controller.js`: Controlador para gerenciamento de integrações
+   - `settings.controller.js`: Controlador para configurações de conta
+
+4. **Modelos de Dados**: Estruturas para armazenamento de dados
+   - `ApiConnection`: Modelo para armazenamento de conexões com APIs externas
+   - `Company`: Modelo para empresas dos usuários
+   - `UserCompany`: Modelo para associação entre usuários e empresas
 
 ## Configuração
 
 ### Pré-requisitos
 
-- Conta de desenvolvedor no Meta for Developers
-- Aplicativo criado no Meta for Developers com a API de Marketing habilitada
-- Token de acesso com as permissões necessárias
+- Conta de desenvolvedor no Meta for Developers (https://developers.facebook.com)
+- Aplicativo do Meta configurado com permissões para Ads Management
+- Node.js 14+ e npm/yarn
 
-### Variáveis de Ambiente
+### Configuração do Aplicativo no Meta for Developers
 
-Configure as seguintes variáveis no arquivo `.env`:
+1. Acesse https://developers.facebook.com e crie um novo aplicativo do tipo "Business"
+2. Em "Configurações > Básico", anote o ID do Aplicativo e o Segredo do Aplicativo
+3. Em "Produtos > Login do Facebook", configure:
+   - URI de redirecionamento: `https://seu-dominio.com/api/integrations/meta/callback`
+   - Permissões necessárias: `ads_management`, `ads_read`, `business_management`, `public_profile`
+4. Em "Produtos > Marketing API", ative a API e configure as permissões necessárias
+
+### Configuração do Ambiente
+
+Adicione as seguintes variáveis ao arquivo `.env`:
 
 ```
-META_APP_ID=1082403447223274
-META_APP_SECRET=2f7876d06426f849a51202150b3dd55a
-META_REDIRECT_URI=http://localhost:3001/api/integrations/meta/callback
+META_APP_ID=seu_app_id
+META_APP_SECRET=seu_app_secret
+META_REDIRECT_URI=https://seu-dominio.com/api/integrations/meta/callback
 ```
 
 ## Uso
 
-### Conexão OAuth
+### Conectando uma Conta do Facebook
 
-1. Navegue até a página de Integrações
-2. Selecione a aba "Integrações OAuth"
-3. Clique em "Conectar" ao lado do Meta Ads
-4. Siga o fluxo de autorização do Meta
+1. Navegue até a página de integrações em `/settings/integrations/facebook`
+2. Selecione a empresa para a qual deseja conectar a conta
+3. Clique no botão "Conectar com Facebook"
+4. Autorize as permissões solicitadas na janela de login do Facebook
+5. Após a autorização, você será redirecionado de volta para a aplicação
 
 ### Conexão Direta com Token
 
-1. Navegue até a página de Integrações
-2. Selecione a aba "Conexão Direta"
-3. Insira seu token de acesso do Meta Ads
-4. Clique em "Conectar"
+Para ambientes de teste ou situações onde o fluxo OAuth não é adequado:
 
-### Visualização de Métricas
+1. Obtenha um token de acesso válido do Meta Ads (via Graph API Explorer ou outro método)
+2. Navegue até a página de integrações em `/settings/integrations/facebook`
+3. Clique em "Conectar com Token"
+4. Insira o token de acesso e selecione a empresa
+5. Clique em "Conectar"
 
-1. Após conectar, navegue até a página de Relatórios
-2. Selecione uma conta de anúncios
-3. Defina o período de datas
-4. Visualize as métricas e relatórios
+### Gerenciando Integrações
 
-## Permissões Necessárias
+- **Visualizar Integrações**: Acesse `/settings/integrations` para ver todas as integrações ativas
+- **Desativar Integração**: Clique em "Desativar" ao lado da integração que deseja desativar
+- **Reconectar**: Se o token expirar, clique em "Reconectar" para iniciar um novo fluxo de autorização
 
-O token de acesso do Meta Ads deve ter as seguintes permissões:
+## Segurança
 
-- `ads_management`
-- `ads_read`
-- `business_management`
-- `public_profile`
+A integração implementa várias medidas de segurança:
 
-## Scripts de Teste
+1. **Prevenção de CSRF**: Uso de estado seguro para evitar ataques de solicitação forjada entre sites
+2. **Armazenamento Seguro de Tokens**: Tokens são armazenados de forma segura no banco de dados
+3. **Verificação de Permissões**: Verificação se o usuário tem acesso à empresa antes de permitir a integração
+4. **Renovação Automática de Tokens**: Implementação de renovação automática de tokens expirados (quando disponível)
 
-### Teste de Conexão Direta
+## Solução de Problemas
 
-```bash
-node scripts/test-direct-meta-integration.js
-```
+### Problemas Comuns
 
-Este script testa a conexão direta com o Meta Ads usando um token de acesso.
+1. **Erro "Estado Inválido"**
+   - **Causa**: O estado usado no fluxo OAuth expirou ou é inválido
+   - **Solução**: Tente novamente o processo de conexão
 
-### Teste de Métricas
+2. **Erro "Nenhuma Conta de Anúncios Encontrada"**
+   - **Causa**: O usuário não tem acesso a nenhuma conta de anúncios no Facebook
+   - **Solução**: Verifique se o usuário tem permissões adequadas no Business Manager do Facebook
 
-```bash
-node scripts/test-meta-metrics.js
-```
+3. **Erro "Token Expirado"**
+   - **Causa**: O token de acesso expirou
+   - **Solução**: Reconecte a conta usando o botão "Reconectar"
 
-Este script testa a obtenção de métricas de uma conta de anúncios do Meta.
+4. **Erro "Permissões Insuficientes"**
+   - **Causa**: O aplicativo não tem as permissões necessárias
+   - **Solução**: Verifique se todas as permissões necessárias foram adicionadas no painel do desenvolvedor do Facebook
 
-## Documentação Adicional
+### Logs e Depuração
 
-Para informações mais detalhadas, consulte:
+Para depurar problemas de integração:
 
-- [Guia de Integração com o Meta Ads](./docs/meta-ads-integration.md)
-- [Referência da API do Meta Ads](./docs/meta-ads-api-reference.md)
+1. Verifique os logs do servidor para mensagens detalhadas
+2. Ative o modo de depuração no console do navegador para ver detalhes do SDK do Facebook
+3. Use o Graph API Explorer para testar chamadas de API manualmente
 
-## Limitações Conhecidas
+## Referências
 
-- A implementação atual assume o fornecimento manual do token
-- Atualização automática limitada do token
-- Validação mínima das permissões do token
+- [Meta for Developers](https://developers.facebook.com)
+- [Graph API Reference](https://developers.facebook.com/docs/graph-api)
+- [Marketing API Reference](https://developers.facebook.com/docs/marketing-apis)
+- [Facebook Login](https://developers.facebook.com/docs/facebook-login)
 
 ## Próximos Passos
 
-- Implementar mecanismo de atualização de token
-- Adicionar validação mais robusta de permissões
-- Desenvolver estratégia de rotação de token
-- Melhorar o tratamento de erros e feedback ao usuário
+- Implementar seleção de conta de anúncios quando o usuário tem múltiplas contas
+- Adicionar suporte para renovação automática de tokens de longa duração
+- Implementar métricas em tempo real com atualizações automáticas
+- Expandir a integração para incluir Instagram Ads

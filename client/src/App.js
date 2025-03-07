@@ -1,6 +1,7 @@
 import React from 'react';
 import { BrowserRouter as Router, Routes, Route, Navigate } from 'react-router-dom';
 import { useAuth } from './contexts/AuthContext';
+import FacebookSDK from './components/integration/FacebookSDK';
 
 // Layouts
 import AuthLayout from './components/layouts/AuthLayout';
@@ -30,8 +31,23 @@ const ProtectedRoute = ({ children }) => {
 };
 
 function App() {
+  // Obtendo APP_ID do ambiente
+  const META_APP_ID = process.env.REACT_APP_META_APP_ID || '4190441111244279';
+  
+  // Função executada quando o SDK do Facebook estiver carregado
+  const handleFacebookSDKLoaded = (FB) => {
+    console.log('Facebook SDK carregado com sucesso');
+    // Você pode fazer verificações ou configurações adicionais aqui
+  };
+
   return (
     <Router>
+      {/* Carrega o SDK do Facebook */}
+      <FacebookSDK 
+        appId={META_APP_ID}
+        onSDKLoaded={handleFacebookSDKLoaded}
+      />
+      
       <Routes>
         {/* Auth Routes */}
         <Route element={<AuthLayout />}>

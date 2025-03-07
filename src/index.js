@@ -12,6 +12,8 @@ const reportRoutes = require('./routes/report.routes');
 const integrationRoutes = require('./routes/integration.routes');
 const scheduleRoutes = require('./routes/schedule.routes');
 const metricsRoutes = require('./routes/metrics.routes');
+const settingsRoutes = require('./routes/settings.routes');
+const authCallbackRoutes = require('./routes/auth.callback.routes');
 const { initCronJobs } = require('./config/cron');
 
 dotenv.config();
@@ -20,7 +22,15 @@ const app = express();
 const PORT = process.env.PORT || 3001;
 
 // Middlewares
-app.use(cors());
+app.use(cors({
+  origin: [
+    process.env.FRONTEND_URL || 'https://speedfunnels.marcussviniciusa.cloud',
+    'http://localhost:3000'
+  ],
+  methods: ['GET', 'POST', 'PUT', 'DELETE', 'OPTIONS'],
+  allowedHeaders: ['Content-Type', 'Authorization'],
+  credentials: true
+}));
 app.use(helmet());
 app.use(morgan('dev'));
 app.use(express.json());
@@ -48,6 +58,8 @@ app.use('/api/reports', reportRoutes);
 app.use('/api/integrations', integrationRoutes);
 app.use('/api/schedules', scheduleRoutes);
 app.use('/api/metrics', metricsRoutes);
+app.use('/api/settings', settingsRoutes);
+app.use('/auth', authCallbackRoutes); // Rotas públicas para callbacks (sem autenticação)
 
 // Rota para servir o frontend React em qualquer outra rota
 app.get('*', (req, res) => {

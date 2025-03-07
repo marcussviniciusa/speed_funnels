@@ -19,6 +19,9 @@ import ReportsLibrary from './pages/company/ReportsLibrary';
 import ReportView from './pages/company/ReportView';
 import ScheduleReport from './pages/company/ScheduleReport';
 
+// Páginas de Configurações
+import FacebookIntegration from './pages/settings/FacebookIntegration';
+
 // Páginas Públicas
 import PublicReport from './pages/public/PublicReport';
 import Unauthorized from './pages/Unauthorized';
@@ -64,6 +67,9 @@ const App = () => {
             <Route path="/company/reports/library" element={<ReportsLibrary />} />
             <Route path="/company/reports/:reportId" element={<ReportView />} />
             <Route path="/company/reports/:reportId/schedule" element={<ScheduleReport />} />
+            
+            {/* Rotas de Configurações */}
+            <Route path="/settings/integrations/facebook" element={<FacebookIntegration />} />
           </Route>
           
           {/* Fallback para rota não encontrada */}

@@ -13,6 +13,7 @@ router.get('/', integrationController.getAllIntegrations);
 router.get('/meta/auth/:companyId', integrationController.startMetaIntegration);
 router.get('/meta/callback', integrationController.metaCallback);
 router.post('/meta/connect/:companyId', integrationController.connectMetaWithToken);
+// A rota pública para callback foi movida para auth.callback.routes.js
 
 // Rotas para Google Analytics
 router.get('/google/auth/:companyId', integrationController.startGoogleIntegration);
@@ -24,4 +25,4 @@ router.get('/company/:companyId', integrationController.listIntegrations);
 // Desativar uma integração
 router.put('/:integrationId/disable', integrationController.disableIntegration);
 
-module.exports = router; 
+module.exports = router;

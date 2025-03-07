@@ -8,7 +8,7 @@ const META_BASE_URL = `https://graph.facebook.com/${META_API_VERSION}`;
 // Configurações do Meta OAuth
 const META_APP_ID = process.env.META_APP_ID;
 const META_APP_SECRET = process.env.META_APP_SECRET;
-const REDIRECT_URI = process.env.META_REDIRECT_URI || 'http://localhost:3001/api/integrations/meta/callback';
+const REDIRECT_URI = process.env.META_REDIRECT_URI || 'https://speedfunnels.marcussviniciusa.cloud/auth/callback/facebook';
 
 // Verificar configurações
 const verifyConfig = () => {
