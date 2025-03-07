@@ -12,9 +12,14 @@ const metricsService = {
    */
   getMetaMetrics: async (adAccountId, dateRange) => {
     try {
+      console.log(`Solicitando métricas do Meta para conta: ${adAccountId}`);
+      console.log('Período:', dateRange);
+      
       const response = await api.get(`/api/metrics/meta/${adAccountId}`, {
         params: dateRange
       });
+      
+      console.log('Resposta recebida:', response.data);
       return response.data;
     } catch (error) {
       console.error('Erro ao obter métricas do Meta Ads:', error);

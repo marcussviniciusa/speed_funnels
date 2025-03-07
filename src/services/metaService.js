@@ -94,19 +94,29 @@ exports.getAdAccounts = async (accessToken) => {
   verifyConfig();
   
   try {
-    console.log('Solicitando contas de anúncios com token:', accessToken);
+    console.log('Solicitando contas de anúncios com token:', accessToken.substring(0, 15) + '...');
     
     const response = await axios.get(`${META_BASE_URL}/me/adaccounts`, {
       params: {
         access_token: accessToken,
         fields: 'id,name,account_id,account_status,business_name,currency',
+        limit: 25,
       },
     });
     
     console.log('Resposta do Meta para contas de anúncios:', JSON.stringify(response.data, null, 2));
     
-    // Filtrar apenas contas ativas (account_status == 1)
-    return response.data.data.filter(account => account.account_status === 1);
+    // Normalizar os dados para facilitar o uso no frontend
+    const accounts = response.data.data.map(account => ({
+      id: account.id, // Mantém o formato completo (act_XXXXX)
+      accountId: account.account_id, // ID numérico puro
+      name: account.name,
+      status: account.account_status,
+      businessName: account.business_name || '',
+      currency: account.currency
+    }));
+    
+    return accounts;
   } catch (error) {
     console.error('Erro ao obter contas de anúncios:', error.response?.data || error.message);
     throw createError(500, 'Erro ao obter contas de anúncios Meta');
@@ -118,11 +128,16 @@ exports.getCampaignMetrics = async (accessToken, adAccountId, dateRange) => {
   verifyConfig();
   
   try {
-    console.log('Solicitando métricas de campanhas com token:', accessToken, 'e conta:', adAccountId);
+    // Remove o prefixo 'act_' se já estiver presente no ID da conta
+    const formattedAccountId = adAccountId.startsWith('act_') ? adAccountId : `act_${adAccountId}`;
+    
+    console.log('Solicitando métricas de campanhas com token:', accessToken.substring(0, 15) + '...');
+    console.log('Conta de anúncios formatada:', formattedAccountId);
+    console.log('Período:', dateRange);
     
     const { startDate, endDate } = dateRange;
     
-    const response = await axios.get(`${META_BASE_URL}/act_${adAccountId}/insights`, {
+    const response = await axios.get(`${META_BASE_URL}/${formattedAccountId}/insights`, {
       params: {
         access_token: accessToken,
         time_range: JSON.stringify({ since: startDate, until: endDate }),
@@ -145,11 +160,16 @@ exports.getDailyMetrics = async (accessToken, adAccountId, dateRange) => {
   verifyConfig();
   
   try {
-    console.log('Solicitando métricas diárias com token:', accessToken, 'e conta:', adAccountId);
+    // Remove o prefixo 'act_' se já estiver presente no ID da conta
+    const formattedAccountId = adAccountId.startsWith('act_') ? adAccountId : `act_${adAccountId}`;
+    
+    console.log('Solicitando métricas diárias com token:', accessToken.substring(0, 15) + '...');
+    console.log('Conta de anúncios formatada:', formattedAccountId);
+    console.log('Período:', dateRange);
     
     const { startDate, endDate } = dateRange;
     
-    const response = await axios.get(`${META_BASE_URL}/act_${adAccountId}/insights`, {
+    const response = await axios.get(`${META_BASE_URL}/${formattedAccountId}/insights`, {
       params: {
         access_token: accessToken,
         time_range: JSON.stringify({ since: startDate, until: endDate }),

@@ -34,6 +34,9 @@ exports.getMetaMetrics = async (req, res, next) => {
       throw createError(401, 'Token de acesso expirado. Por favor, reconecte sua conta Meta Ads');
     }
     
+    console.log(`Buscando métricas para conta de anúncios: ${adAccountId} no período de ${startDate} a ${endDate}`);
+    console.log(`Usando token: ${connection.accessToken.substring(0, 15)}...`);
+    
     // Buscar métricas de campanhas
     const campaignMetrics = await metaService.getCampaignMetrics(
       connection.accessToken, 

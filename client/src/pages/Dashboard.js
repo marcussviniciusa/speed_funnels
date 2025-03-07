@@ -488,7 +488,7 @@ const Dashboard = () => {
                         >
                           {metaAccounts.map(account => (
                             <MenuItem key={account.id} value={account.id}>
-                              {account.name}
+                              {account.name} {account.businessName ? `(${account.businessName})` : ''}
                             </MenuItem>
                           ))}
                         </Select>
