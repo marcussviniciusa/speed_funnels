@@ -4,8 +4,6 @@ services:
   speed_funnels:
     image: marcussviniciusa/speed-funnels:v1.0.7
     restart: unless-stopped
-    depends_on:
-      - postgres
     networks:
       - network_public
     environment:
@@ -43,36 +41,7 @@ services:
         - traefik.http.routers.speed_funnels.tls.certresolver=letsencryptresolver
         - traefik.http.services.speed_funnels.loadbalancer.server.port=3001
 
-  postgres:
-    image: postgres:14-alpine
-    restart: unless-stopped
-    volumes:
-      - speedfunnels_db_data:/var/lib/postgresql/data
-    environment:
-      - POSTGRES_USER=postgres
-      - POSTGRES_PASSWORD=Marcus1911!!Marcus
-      - POSTGRES_DB=speedfunnels
-    networks:
-      - network_public
-    deploy:
-      mode: replicated
-      replicas: 1
-      placement:
-        constraints:
-          - node.role == manager
-      resources:
-        limits:
-          cpus: "0.5"
-          memory: 512M
-      labels:
-        - traefik.enable=false
-
 networks:
   network_public:
     external: true
     name: network_public
-
-volumes:
-  speedfunnels_db_data:
-    external: true
-    name: speedfunnels_db_data

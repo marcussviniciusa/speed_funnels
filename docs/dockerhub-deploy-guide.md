@@ -89,6 +89,104 @@ Quando precisar atualizar a aplicação:
    - Se editou diretamente o YAML, atualize a tag na linha da imagem
    - Clique em "Update the stack"
 
+## Solução de Problemas de Acesso após Deploy
+
+Se você estiver enfrentando problemas para acessar a aplicação após o deploy, siga este guia de solução de problemas:
+
+### 1. Verificar a Acessibilidade da Aplicação
+
+Execute o script de verificação de acessibilidade:
+
+```bash
+node scripts/check-deployment.js
+```
+
+Este script irá testar a conexão com a API e o frontend, verificar redirecionamentos e configurações de CORS.
+
+### 2. Verificar os Logs do Contêiner
+
+Acesse o Portainer e verifique os logs do contêiner:
+
+1. Navegue até "Containers" no menu lateral
+2. Encontre o contêiner da aplicação Speed Funnels
+3. Clique no ícone de logs (ícone de lista)
+4. Procure por erros relacionados ao servimento de arquivos estáticos ou conexão com o banco de dados
+
+Alternativamente, use o comando Docker:
+
+```bash
+docker logs <container_id>
+```
+
+### 3. Verificar Configurações de Rede
+
+Verifique se as configurações de rede estão corretas:
+
+1. Certifique-se de que a rede `network_public` existe:
+   ```bash
+   docker network ls | grep network_public
+   ```
+
+2. Verifique se o contêiner está conectado à rede correta:
+   ```bash
+   docker network inspect network_public
+   ```
+
+### 4. Verificar Configurações do Traefik
+
+Verifique se o Traefik está configurado corretamente:
+
+1. Certifique-se de que `traefik.enable=true` para o serviço app
+2. Verifique se o Host está configurado corretamente
+3. Confirme se a porta 3001 está exposta corretamente
+
+### 5. Verificar Caminhos no Contêiner Docker
+
+Acesse o contêiner e execute o script de verificação de caminhos:
+
+```bash
+docker exec -it <container_id> sh
+./scripts/check-docker-paths.sh
+```
+
+### 6. Aplicar Correções Automáticas
+
+Execute o script de correção que implementa várias melhorias:
+
+```bash
+./scripts/fix-auth.sh
+```
+
+Este script irá:
+1. Corrigir o servimento de arquivos estáticos no ambiente Docker
+2. Verificar a configuração do Traefik para acesso externo
+3. Construir uma nova imagem Docker (v1.0.7)
+4. Publicar a imagem no Docker Hub
+
+Após executar o script, atualize o stack no Portainer para usar a nova imagem.
+
+### 7. Verificar DNS e Certificados SSL
+
+1. Confirme se o domínio está apontando para o servidor correto:
+   ```bash
+   ping seu-dominio.com
+   ```
+
+2. Verifique se os certificados SSL estão válidos:
+   ```bash
+   curl -vI https://seu-dominio.com
+   ```
+
+### 8. Reiniciar o Stack
+
+Se todas as verificações acima não resolverem o problema, tente reiniciar o stack:
+
+1. Acesse o Portainer
+2. Navegue até "Stacks"
+3. Selecione o stack "speed-funnels"
+4. Clique em "Stop stack"
+5. Após parar, clique em "Start stack"
+
 ## Vantagens de usar o Docker Hub
 
 1. **Centralização**: Suas imagens ficam armazenadas em um repositório central
@@ -133,4 +231,3 @@ jobs:
           context: .
           push: true
           tags: ${{ secrets.DOCKERHUB_USERNAME }}/speed-funnels:latest
-```

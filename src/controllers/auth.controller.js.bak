@@ -1,14 +1,30 @@
 const jwt = require('jsonwebtoken');
 const createError = require('http-errors');
-const { User, Company } = require('../models');
-const bcrypt = require('bcrypt');
+
+// Usuários simulados para teste
+const users = [
+  {
+    id: 1,
+    name: 'Admin',
+    email: 'admin@example.com',
+    password: 'admin123',
+    role: 'admin'
+  },
+  {
+    id: 2,
+    name: 'Usuário',
+    email: 'user@example.com',
+    password: 'user123',
+    role: 'user'
+  }
+];
 
 exports.register = async (req, res, next) => {
   try {
     const { name, email, password, role } = req.body;
     
     // Verificar se o usuário já existe
-    const existingUser = await User.findOne({ where: { email } });
+    const existingUser = users.find(user => user.email === email);
     if (existingUser) {
       throw createError(409, 'Este email já está registrado');
     }
@@ -18,13 +34,16 @@ exports.register = async (req, res, next) => {
       throw createError(403, 'Sem permissão para criar usuário superadmin');
     }
     
-    // Criar novo usuário
-    const newUser = await User.create({
+    // Criar novo usuário simulado
+    const newUser = {
+      id: users.length + 1,
       name,
       email,
-      password, // O hook beforeCreate no modelo fará o hash da senha
+      password,
       role: role || 'user',
-    });
+    };
+    
+    users.push(newUser);
     
     res.status(201).json({
       success: true,
@@ -46,27 +65,15 @@ exports.login = async (req, res, next) => {
     const { email, password } = req.body;
     
     // Buscar usuário
-    const user = await User.findOne({ 
-      where: { email },
-      include: [{
-        model: Company,
-        as: 'companies',
-        through: { attributes: ['role'] }
-      }]
-    });
-    
+    const user = users.find(user => user.email === email);
     if (!user) {
       throw createError(401, 'Credenciais inválidas');
     }
     
-    // Verificar senha usando o método do modelo
-    const isPasswordValid = await user.validatePassword(password);
-    if (!isPasswordValid) {
+    // Verificar senha
+    if (user.password !== password) {
       throw createError(401, 'Credenciais inválidas');
     }
-    
-    // Atualizar último login
-    await user.update({ lastLogin: new Date() });
     
     // Gerar token JWT
     const token = jwt.sign(
@@ -76,8 +83,8 @@ exports.login = async (req, res, next) => {
         email: user.email,
         role: user.role,
       },
-      process.env.JWT_SECRET || 'your-secret-key',
-      { expiresIn: process.env.JWT_EXPIRATION || '24h' }
+      process.env.JWT_SECRET,
+      { expiresIn: process.env.JWT_EXPIRATION }
     );
     
     res.json({
@@ -89,7 +96,6 @@ exports.login = async (req, res, next) => {
         name: user.name,
         email: user.email,
         role: user.role,
-        companies: user.companies,
       },
     });
   } catch (error) {

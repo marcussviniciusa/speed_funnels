@@ -1,4 +1,18 @@
-const jwt = require('jsonwebtoken');
+#!/usr/bin/env node
+
+/**
+ * Script para corrigir o controlador de autenticação
+ * Este script atualiza o controlador de autenticação para usar o banco de dados em vez de um array estático
+ */
+
+const fs = require('fs');
+const path = require('path');
+
+// Caminho para o controlador de autenticação
+const authControllerPath = path.join(__dirname, '../src/controllers/auth.controller.js');
+
+// Novo conteúdo para o controlador
+const newContent = `const jwt = require('jsonwebtoken');
 const createError = require('http-errors');
 const { User, Company } = require('../models');
 const bcrypt = require('bcrypt');
@@ -96,3 +110,15 @@ exports.login = async (req, res, next) => {
     next(error);
   }
 };
+`;
+
+// Backup do arquivo original
+const backupPath = `${authControllerPath}.bak`;
+fs.copyFileSync(authControllerPath, backupPath);
+console.log(`Backup do controlador original criado em: ${backupPath}`);
+
+// Escrever o novo conteúdo
+fs.writeFileSync(authControllerPath, newContent);
+console.log(`Controlador de autenticação atualizado com sucesso!`);
+console.log(`O controlador agora usa o banco de dados em vez de um array estático.`);
+console.log(`Você pode fazer login usando o email e senha que você criou.`);

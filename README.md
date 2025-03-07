@@ -61,6 +61,16 @@ Speed Funnels é uma plataforma de integração de marketing que conecta Meta Ad
    npm run dev
    ```
 
+### Autenticação
+
+O sistema utiliza autenticação baseada em JWT com controle de acesso por função (RBAC). Para criar o primeiro usuário administrador, execute:
+
+```bash
+node scripts/reset-admin-password.js
+```
+
+Para mais detalhes sobre o sistema de autenticação, consulte a [Documentação de Autenticação](docs/AUTENTICACAO.md).
+
 ### Deploy com Docker e Traefik
 
 Para deploy em produção, utilizamos Docker com Traefik como proxy reverso para:

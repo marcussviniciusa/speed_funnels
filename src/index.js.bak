@@ -26,18 +26,11 @@ app.use(morgan('dev'));
 app.use(express.json());
 
 // Servir arquivos estáticos do frontend
-const clientBuildPath = process.env.NODE_ENV === 'production' 
-  ? path.join(__dirname, '../client/build') 
-  : path.join(__dirname, '../client/build');
-app.use(express.static(clientBuildPath));
-console.log(`Servindo arquivos estáticos de: ${clientBuildPath}`);
+app.use(express.static(path.join(__dirname, '../client/build')));
 
 // Rota raiz
 app.get('/', (req, res) => {
-  const indexPath = process.env.NODE_ENV === 'production'
-    ? path.join(__dirname, '../client/build', 'index.html')
-    : path.join(__dirname, '../client/build', 'index.html');
-  res.sendFile(indexPath);
+  res.sendFile(path.join(__dirname, '../client/build', 'index.html'));
 });
 
 // Rotas
@@ -51,10 +44,7 @@ app.use('/api/metrics', metricsRoutes);
 
 // Rota para servir o frontend React em qualquer outra rota
 app.get('*', (req, res) => {
-  const indexPath = process.env.NODE_ENV === 'production'
-    ? path.join(__dirname, '../client/build', 'index.html')
-    : path.join(__dirname, '../client/build', 'index.html');
-  res.sendFile(indexPath);
+  res.sendFile(path.join(__dirname, '../client/build', 'index.html'));
 });
 
 // Tratamento de erros

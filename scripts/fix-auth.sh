@@ -1,49 +1,21 @@
 #!/bin/bash
 
+# Script para corrigir o problema de autenticação no Speed Funnels
+# Uso: ./scripts/fix-auth.sh
+
 # Cores para saída
 GREEN='\033[0;32m'
 YELLOW='\033[1;33m'
 RED='\033[0;31m'
 NC='\033[0m' # Sem cor
 
-echo -e "${YELLOW}Iniciando script de correção do frontend e atualização do stack...${NC}"
+echo -e "${YELLOW}Iniciando script de correção do problema de autenticação...${NC}"
 
 # Verificar se está no diretório raiz do projeto
-if [ ! -f "package.json" ] || [ ! -d "client" ]; then
+if [ ! -f "package.json" ] || [ ! -d "src" ]; then
   echo -e "${RED}Erro: Este script deve ser executado no diretório raiz do projeto Speed Funnels.${NC}"
   exit 1
 fi
-
-# Verificar se o diretório build do cliente existe
-if [ ! -d "client/build" ]; then
-  echo -e "${YELLOW}Diretório build do cliente não encontrado. Compilando o frontend...${NC}"
-  
-  cd client
-  
-  # Verificar se o npm está instalado
-  if ! command -v npm &> /dev/null; then
-    echo -e "${RED}Erro: npm não está instalado. Instale o Node.js e npm para continuar.${NC}"
-    exit 1
-  fi
-  
-  # Instalar dependências e compilar
-  echo -e "${YELLOW}Instalando dependências do cliente...${NC}"
-  npm install
-  
-  echo -e "${YELLOW}Compilando o frontend...${NC}"
-  npm run build
-  
-  if [ ! -d "build" ]; then
-    echo -e "${RED}Erro: Falha ao compilar o frontend.${NC}"
-    exit 1
-  fi
-  
-  cd ..
-  echo -e "${GREEN}Frontend compilado com sucesso!${NC}"
-fi
-
-# Construir e publicar a imagem Docker
-echo -e "${YELLOW}Construindo e publicando a imagem Docker...${NC}"
 
 # Verificar se o Docker está instalado
 if ! command -v docker &> /dev/null; then
@@ -52,9 +24,28 @@ if ! command -v docker &> /dev/null; then
 fi
 
 # Definir a versão
-VERSION="v1.0.5"
+VERSION="v1.0.7"
 REGISTRY_URL="marcussviniciusa"
 IMAGE_NAME="speed-funnels"
+
+# Tornar os scripts executáveis
+chmod +x ./scripts/*.js
+chmod +x ./scripts/*.sh
+
+# Aplicar correções
+echo -e "${YELLOW}Aplicando correções...${NC}"
+
+# Verificar se o script fix-static-serving.js foi executado
+if [ ! -f "src/index.js.bak" ]; then
+  echo -e "${YELLOW}Aplicando correção para servimento de arquivos estáticos...${NC}"
+  node ./scripts/fix-static-serving.js
+fi
+
+# Verificar se o script fix-traefik-config.js foi executado
+if [ ! -f "portainer-stack.yml.bak" ]; then
+  echo -e "${YELLOW}Aplicando correção para configuração do Traefik...${NC}"
+  node ./scripts/fix-traefik-config.js
+fi
 
 # Construir a imagem
 echo -e "${YELLOW}Construindo imagem Docker ${REGISTRY_URL}/${IMAGE_NAME}:${VERSION}...${NC}"
@@ -87,10 +78,13 @@ echo -e "4. Atualize a variável TAG para: ${VERSION}"
 echo -e "5. Clique em 'Update the stack'"
 echo -e ""
 echo -e "${GREEN}As seguintes alterações foram feitas:${NC}"
-echo -e "1. Configuração para servir os arquivos estáticos do frontend"
-echo -e "2. Correção da porta no Traefik (3000 -> 3001)"
-echo -e "3. Correção do problema de senha do banco de dados"
-echo -e "4. Publicação de uma nova imagem Docker com as correções"
+echo -e "1. Correção do controlador de autenticação para usar o banco de dados"
+echo -e "2. Correção do método de validação de senha"
+echo -e "3. Correção do servimento de arquivos estáticos no ambiente Docker"
+echo -e "4. Verificação da configuração do Traefik para acesso externo"
+echo -e ""
+echo -e "${YELLOW}Após o deploy, verifique a acessibilidade da aplicação com:${NC}"
+echo -e "node ./scripts/check-deployment.js"
 echo -e ""
 echo -e "${YELLOW}Se preferir atualizar automaticamente o stack, execute:${NC}"
 echo -e "./scripts/update-stack.sh <PORTAINER_URL> <PORTAINER_USERNAME> <PORTAINER_PASSWORD> <STACK_NAME> ${VERSION}"
