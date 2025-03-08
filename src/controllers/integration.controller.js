@@ -1,8 +1,17 @@
 const crypto = require('crypto');
+const axios = require('axios');
 const { ApiConnection, Company, UserCompany } = require('../models');
 const metaService = require('../services/metaService');
 const googleAnalyticsService = require('../services/googleAnalyticsService');
 const createError = require('http-errors');
+
+// Variáveis de ambiente para Meta
+const META_APP_ID = process.env.META_APP_ID;
+const META_APP_SECRET = process.env.META_APP_SECRET;
+const META_REDIRECT_URI = process.env.META_REDIRECT_URI;
+const META_AUTH_URL = process.env.META_AUTH_URL || 'https://www.facebook.com/v22.0/dialog/oauth';
+const META_TOKEN_URL = process.env.META_TOKEN_URL || 'https://graph.facebook.com/v22.0/oauth/access_token';
+const META_SCOPE = process.env.META_SCOPE || 'ads_read,ads_management,business_management,public_profile';
 
 // Gerar estado seguro para OAuth
 const generateState = (userId, companyId, platform) => {
@@ -182,262 +191,152 @@ exports.startMetaIntegration = async (req, res, next) => {
   }
 };
 
-// Callback para integração com Meta
-exports.metaCallback = async (req, res, next) => {
+// Autenticação com o Meta (antigo Facebook) OAuth
+exports.metaAuth = async (req, res) => {
   try {
-    const { code, state, error, error_description } = req.query;
-    
-    console.log(`Callback do Meta recebido. Estado: ${state}`);
-    
-    // Verificar se houve erro na autorização
-    if (error) {
-      console.error(`Erro na autorização do Meta: ${error} - ${error_description}`);
-      return res.redirect(`/settings/integrations/facebook?error=${encodeURIComponent(error_description || error)}`);
+    const { companyId } = req.params;
+    const userId = req.user.id;
+
+    if (!companyId) {
+      return res.status(400).json({ error: 'ID da empresa é obrigatório' });
     }
-    
-    // Verificar se o código e o estado estão presentes
-    if (!code || !state) {
-      console.error('Código ou estado ausente no callback do Meta');
-      return res.redirect('/settings/integrations/facebook?error=Parâmetros%20inválidos%20no%20callback');
-    }
-    
-    // Verificar o estado para evitar CSRF
-    const stateData = verifyState(state, req.user.id);
-    
-    if (!stateData) {
-      console.error(`Estado inválido no callback do Meta: ${state}`);
-      return res.redirect('/settings/integrations/facebook?error=Estado%20inválido%20ou%20expirado');
-    }
-    
-    const { userId, companyId, platform } = stateData;
-    
-    // Verificar se a plataforma é a correta
-    if (platform !== 'meta') {
-      console.error(`Plataforma incorreta no estado: ${platform}`);
-      return res.redirect('/settings/integrations/facebook?error=Plataforma%20incorreta');
-    }
-    
-    console.log(`Estado verificado para usuário ${userId} e empresa ${companyId}`);
-    
-    // Trocar o código por um token de acesso
-    let tokenData;
-    try {
-      tokenData = await metaService.getAccessToken(code);
-      console.log('Token obtido com sucesso');
-    } catch (error) {
-      console.error('Erro ao obter token do Meta:', error);
-      return res.redirect(`/settings/integrations/facebook?error=${encodeURIComponent('Erro ao obter token de acesso')}`);
-    }
-    
-    // Obter informações do usuário
-    let userInfo;
-    try {
-      userInfo = await metaService.getUserInfo(tokenData.accessToken);
-      console.log(`Informações do usuário Meta obtidas: ${userInfo.name} (${userInfo.id})`);
-    } catch (error) {
-      console.error('Erro ao obter informações do usuário Meta:', error);
-      return res.redirect(`/settings/integrations/facebook?error=${encodeURIComponent('Erro ao obter informações do usuário')}`);
-    }
-    
-    // Obter contas de anúncios
-    let adAccounts;
-    try {
-      adAccounts = await metaService.getAdAccounts(tokenData.accessToken);
-      console.log(`${adAccounts.length} contas de anúncios encontradas`);
-      
-      if (adAccounts.length === 0) {
-        return res.redirect('/settings/integrations/facebook?error=Nenhuma%20conta%20de%20anúncios%20encontrada');
-      }
-    } catch (error) {
-      console.error('Erro ao obter contas de anúncios:', error);
-      return res.redirect(`/settings/integrations/facebook?error=${encodeURIComponent('Erro ao obter contas de anúncios')}`);
-    }
-    
-    // Selecionar a primeira conta de anúncios ativa (se disponível)
-    const defaultAccount = adAccounts && adAccounts.length > 0 ? adAccounts[0] : null;
-    
-    // Verificar se já existe uma conexão para esta conta/empresa
-    let connection = await ApiConnection.findOne({
+
+    // Verificar se a empresa existe e se o usuário tem acesso a ela
+    const userCompany = await UserCompany.findOne({
       where: {
         userId,
-        companyId,
-        platform: 'meta',
-        accountId: defaultAccount ? defaultAccount.id : null
+        companyId
+      },
+      include: {
+        model: Company,
+        as: 'company'
       }
     });
-    
-    if (connection) {
-      // Atualizar conexão existente
-      console.log(`Atualizando conexão existente para conta ${defaultAccount ? defaultAccount.id : null}`);
-      
-      await connection.update({
-        accessToken: tokenData.accessToken,
-        refreshToken: tokenData.refreshToken || null,
-        tokenExpiresAt: new Date(Date.now() + (tokenData.expiresIn * 1000)),
-        accountName: defaultAccount ? defaultAccount.name : null,
-        accountData: JSON.stringify(defaultAccount),
-        isActive: true,
-        lastSync: new Date()
-      });
-    } else {
-      // Criar nova conexão
-      console.log(`Criando nova conexão para conta ${defaultAccount ? defaultAccount.id : null}`);
-      
-      connection = await ApiConnection.create({
-        userId,
-        companyId,
-        platform: 'meta',
-        accountId: defaultAccount ? defaultAccount.id : null,
-        accountName: defaultAccount ? defaultAccount.name : null,
-        accessToken: tokenData.accessToken,
-        refreshToken: tokenData.refreshToken || null,
-        tokenExpiresAt: new Date(Date.now() + (tokenData.expiresIn * 1000)),
-        accountData: JSON.stringify(defaultAccount),
-        isActive: true,
-        lastSync: new Date()
-      });
+
+    if (!userCompany) {
+      return res.status(403).json({ error: 'Usuário não tem acesso a esta empresa' });
     }
-    
-    console.log(`Integração com Meta concluída com sucesso para conta ${defaultAccount ? defaultAccount.id : null}`);
-    
-    // Redirecionar para a página de integrações com sucesso
-    res.redirect('/settings/integrations/facebook?success=true&platform=meta');
+
+    console.log(`Empresa ${companyId} encontrada: ${userCompany.company.name}`);
+
+    // Gerar estado único para esta solicitação (inclui userId e companyId)
+    const state = `${userId}_${companyId}_${Date.now()}`;
+    console.log(`Estado gerado: ${state}`);
+
+    // Montar URL de autorização do Meta
+    const authUrl = `${META_AUTH_URL}?client_id=${META_APP_ID}&redirect_uri=${encodeURIComponent(META_REDIRECT_URI)}&scope=${encodeURIComponent(META_SCOPE)}&state=${state}&response_type=code`;
+    console.log(`URL de autorização gerada: ${authUrl}`);
+
+    res.json({
+      authUrl
+    });
   } catch (error) {
-    console.error('Erro no callback do Meta:', error);
-    next(error);
+    console.error('Erro ao gerar URL de autorização do Meta:', error);
+    res.status(500).json({ error: 'Erro ao gerar URL de autorização' });
   }
 };
 
-// Callback público para integração com Meta (sem autenticação)
-exports.metaPublicCallback = async (req, res, next) => {
+// Callback para processar a autenticação do Meta
+exports.metaCallback = async (req, res) => {
   try {
-    const redirectBaseUrl = process.env.FRONTEND_URL || 'https://speedfunnels.marcussviniciusa.cloud';
+    // Extrair parâmetros da consulta
     const { code, state, error, error_description } = req.query;
-    
-    // Log detalhado dos parâmetros recebidos
     console.log('Callback do Meta recebido com parâmetros:', {
       code: code ? 'Presente' : 'Ausente',
-      state: state,
-      error: error,
-      error_description: error_description,
+      state,
+      error,
+      error_description,
       query: JSON.stringify(req.query)
     });
-    
+
     // Verificar se houve erro na autorização
     if (error) {
-      console.error(`Erro na autorização do Meta: ${error} - ${error_description}`);
-      return res.redirect(`${redirectBaseUrl}/integrations?error=${encodeURIComponent(error_description || error)}`);
+      console.error('Erro na autorização do Meta:', error, error_description);
+      return res.redirect('/integrations?error=' + encodeURIComponent(error_description || 'Erro na autorização com Meta'));
     }
-    
-    // Verificar se o código e o estado estão presentes
-    if (!code) {
-      console.error('Código de autorização ausente no callback');
-      return res.redirect(`${redirectBaseUrl}/integrations?error=Código%20de%20autorização%20ausente`);
+
+    // Verificar se temos código e estado
+    if (!code || !state) {
+      console.error('Parâmetros obrigatórios ausentes:', { code, state });
+      return res.redirect('/integrations?error=' + encodeURIComponent('Parâmetros de autorização ausentes'));
     }
-    
-    if (!state) {
-      console.error('Estado ausente no callback');
-      return res.redirect(`${redirectBaseUrl}/integrations?error=Estado%20ausente`);
-    }
-    
-    // Extrair dados do estado
-    // Formato esperado: userid_companyid_timestamp
-    const stateData = state.split('_');
-    
-    if (stateData.length < 3) {
-      console.error(`Formato inválido de estado: ${state}`);
-      return res.redirect(`${redirectBaseUrl}/integrations?error=Formato%20de%20estado%20inválido`);
-    }
-    
-    const userId = stateData[0];
-    const companyId = stateData[1];
-    
+
+    // Extrair userId e companyId do estado
+    const [userId, companyId] = state.split('_');
     console.log(`Processando callback para usuário ${userId} e empresa ${companyId}`);
-    
-    // Trocar código por token de acesso
-    try {
-      const tokenData = await metaService.getAccessToken(code);
-      
-      if (!tokenData || !tokenData.accessToken) {
-        console.error('Falha ao obter token de acesso');
-        return res.redirect(`${redirectBaseUrl}/integrations?error=Falha%20ao%20obter%20token%20de%20acesso`);
-      }
-      
-      // Obter informações do usuário do Meta
-      const userInfo = await metaService.getUserInfo(tokenData.accessToken);
-      
-      // Obter contas de anúncios disponíveis
-      const adAccounts = await metaService.getAdAccounts(tokenData.accessToken);
-      
-      // Filtrar apenas contas ativas (status 1 indica conta ativa)
-      const activeAccounts = adAccounts.filter(account => account.status === 1);
-      
-      // Selecionar a primeira conta de anúncios ativa (se disponível)
-      const defaultAccount = activeAccounts && activeAccounts.length > 0 ? activeAccounts[0] : null;
-      
-      console.log(`Encontradas ${adAccounts.length} contas de anúncios, das quais ${activeAccounts.length} estão ativas`);
-      console.log('Conta padrão selecionada:', defaultAccount ? defaultAccount.name : 'Nenhuma');
-      
-      // Verificar se já existe uma conexão para esta empresa/usuário
-      const existingConnection = await ApiConnection.findOne({
-        where: {
-          userId,
-          companyId,
-          platform: 'meta'
-        }
-      });
-      
-      if (existingConnection) {
-        // Atualizar conexão existente
-        console.log(`Atualizando conexão existente ID: ${existingConnection.id}`);
-        await existingConnection.update({
-          accessToken: tokenData.accessToken,
-          refreshToken: tokenData.refreshToken || null,
-          tokenExpiresAt: tokenData.expiresIn ? new Date(Date.now() + tokenData.expiresIn * 1000) : null,
-          platformUserId: userInfo.id,
-          platformUserName: userInfo.name,
-          platformUserEmail: userInfo.email,
-          metadata: JSON.stringify({
-            adAccounts: adAccounts,
-            userInfo: userInfo
-          }),
-          isActive: true,
-          accountId: defaultAccount ? defaultAccount.id : existingConnection.accountId
-        });
-      } else {
-        // Criar nova conexão
-        console.log('Criando nova conexão');
-        await ApiConnection.create({
-          platform: 'meta',
-          accessToken: tokenData.accessToken,
-          refreshToken: tokenData.refreshToken || null,
-          tokenExpiresAt: tokenData.expiresIn ? new Date(Date.now() + tokenData.expiresIn * 1000) : null,
-          platformUserId: userInfo.id,
-          platformUserName: userInfo.name,
-          platformUserEmail: userInfo.email || null,
-          metadata: JSON.stringify({
-            adAccounts: adAccounts,
-            userInfo: userInfo
-          }),
-          companyId: companyId,
-          userId: userId,
-          isActive: true,
-          accountId: defaultAccount ? defaultAccount.id : null
-        });
-      }
-      
-      console.log('Integração com Meta concluída com sucesso');
-      
-      // Redirecionar para a página de integrações com sucesso
-      return res.redirect(`${redirectBaseUrl}/integrations?success=Integração%20com%20Meta%20Ads%20realizada%20com%20sucesso`);
-    } catch (tokenError) {
-      console.error('Erro ao processar token ou obter dados:', tokenError);
-      return res.redirect(`${redirectBaseUrl}/integrations?error=${encodeURIComponent(tokenError.message || 'Erro ao processar o token')}`);
+
+    if (!userId || !companyId) {
+      console.error('Estado inválido:', state);
+      return res.redirect('/integrations?error=' + encodeURIComponent('Estado inválido'));
     }
+
+    // Obter token de acesso
+    console.log(`Solicitando token do Meta com código: ${code}`);
+    const tokenResponse = await axios.get(`${META_TOKEN_URL}`, {
+      params: {
+        client_id: META_APP_ID,
+        client_secret: META_APP_SECRET,
+        redirect_uri: META_REDIRECT_URI,
+        code
+      }
+    });
+
+    console.log('Resposta do Meta para token:', tokenResponse.data);
+    const accessToken = tokenResponse.data.access_token;
+
+    if (!accessToken) {
+      console.error('Token de acesso não recebido');
+      return res.redirect('/integrations?error=' + encodeURIComponent('Falha ao obter token de acesso'));
+    }
+
+    // Obter informações do usuário
+    console.log('Solicitando informações do usuário com token');
+    const userInfo = await metaService.getUserInfo(accessToken);
+
+    if (!userInfo || !userInfo.id) {
+      console.error('Não foi possível obter informações do usuário do Meta');
+      return res.redirect('/integrations?error=' + encodeURIComponent('Falha ao obter informações do usuário'));
+    }
+
+    // Obter contas de anúncios
+    const adAccountsResponse = await metaService.getAdAccounts(accessToken);
+    
+    if (!adAccountsResponse.success || !adAccountsResponse.accounts || adAccountsResponse.accounts.length === 0) {
+      console.error('Não foi possível obter contas de anúncios', adAccountsResponse.error);
+      return res.redirect('/integrations?error=' + encodeURIComponent('Falha ao obter contas de anúncios'));
+    }
+
+    const adAccounts = adAccountsResponse.accounts;
+    const activeAccounts = adAccounts.filter(account => account.status === 'ACTIVE');
+    
+    if (activeAccounts.length === 0) {
+      console.error('Nenhuma conta de anúncios ativa encontrada');
+      return res.redirect('/integrations?error=' + encodeURIComponent('Nenhuma conta de anúncios ativa encontrada'));
+    }
+
+    // Selecionar a primeira conta por padrão
+    const defaultAccount = activeAccounts[0];
+    console.log(`Conta padrão selecionada: ${defaultAccount.name}`);
+
+    // Criar ou atualizar a conexão
+    const result = await metaService.syncMetaAccountForCompany({
+      userId: Number(userId),
+      companyId: Number(companyId),
+      accessToken,
+      accountId: defaultAccount.id,
+      accountName: defaultAccount.name
+    });
+
+    if (!result.success) {
+      console.error('Erro ao sincronizar conta para empresa:', result.error);
+      return res.redirect('/integrations?error=' + encodeURIComponent(`Erro ao sincronizar dados: ${result.error}`));
+    }
+
+    console.log('Integração com Meta concluída com sucesso');
+    res.redirect('/integrations?success=' + encodeURIComponent('Integração com Meta Ads realizada com sucesso'));
   } catch (error) {
-    console.error('Erro no callback público do Meta:', error);
-    const redirectBaseUrl = process.env.FRONTEND_URL || 'https://speedfunnels.marcussviniciusa.cloud';
-    return res.redirect(`${redirectBaseUrl}/integrations?error=${encodeURIComponent(error.message || 'Erro ao processar o callback')}`);
+    console.error('Erro no callback do Meta:', error);
+    res.redirect('/integrations?error=' + encodeURIComponent(`Erro na integração: ${error.message}`));
   }
 };
 
@@ -894,5 +793,219 @@ exports.syncConnectionData = async (req, res, next) => {
   } catch (error) {
     console.error('Erro ao sincronizar dados da conexão:', error);
     next(error);
+  }
+};
+
+// Callback para processar a autenticação do Meta com rota pública (não requer autenticação)
+exports.metaPublicCallback = async (req, res) => {
+  try {
+    // Extrair parâmetros da consulta
+    const { code, state, error, error_description } = req.query;
+    const redirectBaseUrl = process.env.FRONTEND_URL || 'https://speedfunnels.marcussviniciusa.cloud';
+    
+    console.log('Callback público do Meta recebido com parâmetros:', {
+      code: code ? 'Presente' : 'Ausente',
+      state,
+      error,
+      error_description,
+      query: JSON.stringify(req.query)
+    });
+
+    // Verificar se houve erro na autorização
+    if (error) {
+      console.error('Erro na autorização do Meta:', error, error_description);
+      return res.redirect(`${redirectBaseUrl}/integrations?error=${encodeURIComponent(error_description || 'Erro na autorização com Meta')}`);
+    }
+
+    // Verificar se temos código e estado
+    if (!code || !state) {
+      console.error('Parâmetros obrigatórios ausentes:', { code, state });
+      return res.redirect(`${redirectBaseUrl}/integrations?error=${encodeURIComponent('Parâmetros de autorização ausentes')}`);
+    }
+
+    // Extrair userId e companyId do estado
+    const [userId, companyId] = state.split('_');
+    console.log(`Processando callback público para usuário ${userId} e empresa ${companyId}`);
+
+    if (!userId || !companyId) {
+      console.error('Estado inválido:', state);
+      return res.redirect(`${redirectBaseUrl}/integrations?error=${encodeURIComponent('Estado inválido')}`);
+    }
+
+    // Obter token de acesso
+    console.log(`Solicitando token do Meta com código: ${code}`);
+    const tokenResponse = await axios.get(`${META_TOKEN_URL}`, {
+      params: {
+        client_id: META_APP_ID,
+        client_secret: META_APP_SECRET,
+        redirect_uri: META_REDIRECT_URI,
+        code
+      }
+    });
+
+    console.log('Resposta do Meta para token:', tokenResponse.data);
+    const accessToken = tokenResponse.data.access_token;
+
+    if (!accessToken) {
+      console.error('Token de acesso não recebido');
+      return res.redirect(`${redirectBaseUrl}/integrations?error=${encodeURIComponent('Falha ao obter token de acesso')}`);
+    }
+
+    // Obter informações do usuário
+    console.log('Solicitando informações do usuário com token');
+    const userInfo = await metaService.getUserInfo(accessToken);
+
+    if (!userInfo || !userInfo.id) {
+      console.error('Não foi possível obter informações do usuário do Meta');
+      return res.redirect(`${redirectBaseUrl}/integrations?error=${encodeURIComponent('Falha ao obter informações do usuário')}`);
+    }
+
+    // Obter contas de anúncios
+    const adAccountsResponse = await metaService.getAdAccounts(accessToken);
+    
+    if (!adAccountsResponse.success || !adAccountsResponse.accounts || adAccountsResponse.accounts.length === 0) {
+      console.error('Não foi possível obter contas de anúncios', adAccountsResponse.error);
+      return res.redirect(`${redirectBaseUrl}/integrations?error=${encodeURIComponent('Falha ao obter contas de anúncios')}`);
+    }
+
+    const adAccounts = adAccountsResponse.accounts;
+    const activeAccounts = adAccounts.filter(account => account.status === 'ACTIVE');
+    
+    if (activeAccounts.length === 0) {
+      console.error('Nenhuma conta de anúncios ativa encontrada');
+      return res.redirect(`${redirectBaseUrl}/integrations?error=${encodeURIComponent('Nenhuma conta de anúncios ativa encontrada')}`);
+    }
+
+    // Selecionar a primeira conta por padrão
+    const defaultAccount = activeAccounts[0];
+    console.log(`Conta padrão selecionada: ${defaultAccount.name}`);
+
+    // Criar ou atualizar a conexão
+    const result = await metaService.syncMetaAccountForCompany({
+      userId: Number(userId),
+      companyId: Number(companyId),
+      accessToken,
+      accountId: defaultAccount.id,
+      accountName: defaultAccount.name
+    });
+
+    if (!result.success) {
+      console.error('Erro ao sincronizar conta para empresa:', result.error);
+      return res.redirect(`${redirectBaseUrl}/integrations?error=${encodeURIComponent(`Erro ao sincronizar dados: ${result.error}`)}`);
+    }
+
+    console.log('Integração com Meta concluída com sucesso');
+    res.redirect(`${redirectBaseUrl}/integrations?success=${encodeURIComponent('Integração com Meta Ads realizada com sucesso')}`);
+  } catch (error) {
+    console.error('Erro no callback público do Meta:', error);
+    const redirectBaseUrl = process.env.FRONTEND_URL || 'https://speedfunnels.marcussviniciusa.cloud';
+    res.redirect(`${redirectBaseUrl}/integrations?error=${encodeURIComponent(`Erro na integração: ${error.message}`)}`);
+  }
+};
+
+// Sincronizar dados de uma conta de anúncios Meta específica para uma empresa
+exports.syncMetaAdAccount = async (req, res, next) => {
+  try {
+    const { companyId, adAccountId } = req.body;
+    const userId = req.user.id;
+    
+    if (!companyId) {
+      return res.status(400).json({
+        success: false,
+        error: 'ID da empresa é obrigatório'
+      });
+    }
+    
+    if (!adAccountId) {
+      return res.status(400).json({
+        success: false,
+        error: 'ID da conta de anúncios é obrigatório'
+      });
+    }
+    
+    console.log(`Iniciando sincronização da conta de anúncios ${adAccountId} para a empresa ${companyId}`);
+    
+    // Verificar permissão do usuário para a empresa
+    const userCompany = await UserCompany.findOne({
+      where: {
+        userId,
+        companyId
+      },
+      include: {
+        model: Company,
+        as: 'company'
+      }
+    });
+    
+    if (!userCompany) {
+      return res.status(403).json({
+        success: false,
+        error: 'Você não tem permissão para sincronizar dados para esta empresa'
+      });
+    }
+    
+    // Buscar conexão ativa do Meta para esta empresa
+    const connection = await ApiConnection.findOne({
+      where: {
+        platform: 'meta',
+        is_active: true,
+        user_id: userId,
+        company_id: companyId
+      }
+    });
+    
+    if (!connection) {
+      return res.status(404).json({
+        success: false,
+        error: 'Não foi encontrada uma conexão ativa com Meta Ads para esta empresa'
+      });
+    }
+    
+    // Verificar se o token ainda é válido
+    const tokenValidation = await metaService.validateToken(connection.access_token || connection.accessToken);
+    if (!tokenValidation.isValid) {
+      return res.status(401).json({
+        success: false,
+        error: `Token de acesso inválido: ${tokenValidation.message}. Por favor, reconecte sua conta Meta Ads`
+      });
+    }
+    
+    // Atualizar a conexão com o adAccountId selecionado
+    await ApiConnection.update(
+      {
+        account_id: adAccountId
+      },
+      {
+        where: {
+          id: connection.id
+        }
+      }
+    );
+    
+    // Sincronizar dados
+    const syncResult = await metaService.syncMetaData(connection.id);
+    
+    if (!syncResult.success) {
+      return res.status(500).json({
+        success: false,
+        error: syncResult.error || 'Erro ao sincronizar dados'
+      });
+    }
+    
+    return res.json({
+      success: true,
+      message: 'Dados da conta de anúncios sincronizados com sucesso',
+      data: {
+        companyId,
+        adAccountId,
+        connectionId: connection.id
+      }
+    });
+  } catch (error) {
+    console.error('Erro ao sincronizar conta de anúncios:', error);
+    res.status(500).json({
+      success: false,
+      error: error.message
+    });
   }
 };

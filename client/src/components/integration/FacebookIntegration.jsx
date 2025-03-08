@@ -43,6 +43,24 @@ const FacebookIntegration = ({ onIntegrationSuccess }) => {
   // Carregar lista de empresas ao montar o componente
   useEffect(() => {
     fetchCompanies();
+    
+    // Verificar os parâmetros da URL para detectar sucesso/erro na integração
+    const urlParams = new URLSearchParams(window.location.search);
+    const successMessage = urlParams.get('success');
+    const errorMessage = urlParams.get('error');
+    
+    if (successMessage) {
+      setSuccess(true);
+      // Buscar as contas de anúncios após uma integração bem-sucedida
+      setTimeout(() => {
+        // Após o redirecionamento bem-sucedido, buscamos as empresas e dados
+        fetchCompanies();
+      }, 1000);
+    }
+    
+    if (errorMessage) {
+      setError(decodeURIComponent(errorMessage));
+    }
   }, []);
 
   // Buscar empresas da API
@@ -64,24 +82,38 @@ const FacebookIntegration = ({ onIntegrationSuccess }) => {
     }
   };
 
-  // Buscar contas de anúncios quando a conexão for estabelecida
+  // Buscar contas de anúncios quando uma empresa é selecionada
   useEffect(() => {
-    if (connectionData && connectionData.connectionId) {
-      fetchAdAccounts(connectionData.connectionId);
+    if (selectedCompany) {
+      fetchAdAccounts(selectedCompany);
     }
-  }, [connectionData]);
+  }, [selectedCompany]);
 
   // Buscar contas de anúncios do Meta
-  const fetchAdAccounts = async (connectionId) => {
-    if (!connectionId) return;
+  const fetchAdAccounts = async (companyId) => {
+    if (!companyId) return;
     
     try {
       setLoadingAdAccounts(true);
-      const response = await integrationService.getMetaAdAccounts(connectionId);
+      console.log(`Buscando contas de anúncios para a empresa ${companyId}...`);
+      const response = await integrationService.getMetaAdAccounts(companyId);
       
-      if (response.data && response.data.data) {
-        setAdAccounts(response.data.data);
-        console.log(`Contas de anúncios carregadas: ${response.data.data.length}`);
+      if (response.data && response.data.success) {
+        const accounts = response.data.data.accounts || [];
+        setAdAccounts(accounts);
+        console.log(`Contas de anúncios carregadas: ${accounts.length}`);
+        
+        // Se tiver uma conexão ativa, atualizar os dados de conexão
+        if (response.data.data.activeConnection) {
+          setConnectionData({
+            connectionId: response.data.data.activeConnection.id,
+            accountId: response.data.data.activeConnection.accountId,
+            accountName: response.data.data.activeConnection.accountName
+          });
+          setSuccess(true);
+        }
+      } else {
+        console.log('Resposta recebida sem contas de anúncios:', response.data);
       }
     } catch (err) {
       console.error('Erro ao carregar contas de anúncios:', err);
@@ -135,6 +167,51 @@ const FacebookIntegration = ({ onIntegrationSuccess }) => {
   const handleSyncSuccess = (syncData) => {
     console.log('Sincronização realizada com sucesso:', syncData);
     // Pode adicionar lógica adicional aqui se necessário
+  };
+
+  // Manipular mudança na seleção de conta de anúncios
+  const handleAdAccountChange = (event) => {
+    const newAccountId = event.target.value;
+    const selectedAccount = adAccounts.find(account => account.id === newAccountId);
+    
+    if (selectedAccount) {
+      setConnectionData(prev => ({
+        ...prev,
+        accountId: newAccountId,
+        accountName: selectedAccount.name
+      }));
+      
+      console.log(`Conta de anúncios selecionada: ${selectedAccount.name} (${newAccountId})`);
+    }
+  };
+
+  // Manipular sincronização de conta
+  const handleSyncAccount = async (accountId) => {
+    if (!accountId || !selectedCompany) return;
+    
+    try {
+      setError('');
+      console.log(`Sincronizando conta ${accountId} para empresa ${selectedCompany}`);
+      
+      const response = await integrationService.syncMetaAdAccount(selectedCompany, accountId);
+      
+      if (response.data && response.data.success) {
+        setSuccess(true);
+        alert('Dados sincronizados com sucesso!');
+      } else {
+        setError(response.data?.error || 'Erro ao sincronizar dados');
+      }
+    } catch (err) {
+      console.error('Erro ao sincronizar conta:', err);
+      setError(err.response?.data?.error || 'Erro ao sincronizar dados da conta');
+    }
+  };
+
+  // Manipular reconexão
+  const handleReconnect = () => {
+    setSuccess(false);
+    setConnectionData(null);
+    setAdAccounts([]);
   };
 
   return (
@@ -242,74 +319,56 @@ const FacebookIntegration = ({ onIntegrationSuccess }) => {
             </ListItem>
           </List>
 
-          {/* Mostrar as contas de anúncios carregadas */}
+          {/* Sempre exibir esta seção se houver contas de anúncios, independente da conexão */}
           {loadingAdAccounts ? (
-            <Box sx={{ display: 'flex', justifyContent: 'center', my: 3 }}>
-              <CircularProgress />
+            <Box sx={{ display: 'flex', justifyContent: 'center', my: 2 }}>
+              <Typography variant="body2" sx={{ mr: 1 }}>Carregando contas de anúncios</Typography>
+              <CircularProgress size={24} />
             </Box>
-          ) : (
+          ) : adAccounts.length > 0 ? (
             <>
-              <Typography variant="subtitle1" gutterBottom sx={{ mt: 2 }}>
-                Contas de Anúncios Disponíveis
+              <Typography variant="subtitle1" sx={{ mt: 3, mb: 1 }}>
+                Contas de Anúncios Disponíveis ({adAccounts.length})
               </Typography>
-              <List sx={{ maxHeight: 300, overflow: 'auto', mb: 3, border: '1px solid #eee', borderRadius: 1 }}>
-                {adAccounts.length > 0 ? (
-                  adAccounts.map((account) => {
-                    const isActive = account.account_status === 1 || account.account_status === 2;
-                    return (
-                      <ListItem key={account.id} sx={{ 
-                        bgcolor: isActive ? 'transparent' : '#f5f5f5',
-                        opacity: isActive ? 1 : 0.7 
-                      }}>
-                        <ListItemText
-                          primary={account.name}
-                          secondary={
-                            <>
-                              <Typography component="span" variant="body2">
-                                ID: {account.id}
-                              </Typography>
-                              {account.business_name && (
-                                <Typography component="span" variant="body2" sx={{ display: 'block' }}>
-                                  Empresa: {account.business_name}
-                                </Typography>
-                              )}
-                              <Typography component="span" variant="body2" sx={{ display: 'block' }}>
-                                Status: {isActive ? 'Ativo' : 'Inativo'} | Moeda: {account.currency}
-                              </Typography>
-                            </>
-                          }
-                        />
-                      </ListItem>
-                    );
-                  })
-                ) : (
-                  <ListItem>
-                    <ListItemText primary="Nenhuma conta de anúncios encontrada" />
-                  </ListItem>
-                )}
-              </List>
+              <FormControl fullWidth sx={{ mb: 2 }}>
+                <InputLabel id="ad-account-select-label">Selecionar Conta de Anúncios</InputLabel>
+                <Select
+                  labelId="ad-account-select-label"
+                  id="ad-account-select"
+                  value={connectionData.accountId || ''}
+                  label="Selecionar Conta de Anúncios"
+                  onChange={handleAdAccountChange}
+                >
+                  {adAccounts.map((account) => (
+                    <MenuItem key={account.id} value={account.id}>
+                      {account.name} ({account.id})
+                    </MenuItem>
+                  ))}
+                </Select>
+              </FormControl>
+              <Button 
+                variant="contained" 
+                color="primary" 
+                onClick={() => handleSyncAccount(connectionData.accountId)}
+                disabled={!connectionData.accountId || loadingAdAccounts}
+                sx={{ mr: 1 }}
+              >
+                Sincronizar Dados
+              </Button>
             </>
+          ) : (
+            <Alert severity="info" sx={{ mt: 2 }}>
+              Não foram encontradas contas de anúncios disponíveis. Certifique-se de que sua conta do Meta Ads possui contas de anúncios configuradas.
+            </Alert>
           )}
 
-          {/* Componente de seleção de conta de anúncios */}
-          <CompanySyncSelector 
-            connectionId={connectionData.connectionId} 
-            companyId={connectionData.companyId || selectedCompany}
-            adAccounts={adAccounts}
-            onSyncSuccess={handleSyncSuccess}
-          />
-
-          <Button
-            variant="outlined"
-            color="primary"
-            onClick={() => {
-              setSuccess(false);
-              setConnectionData(null);
-              setAdAccounts([]);
-            }}
+          <Button 
+            variant="outlined" 
+            color="secondary" 
+            onClick={handleReconnect}
             sx={{ mt: 2 }}
           >
-            Nova Conexão
+            Reconectar
           </Button>
         </Box>
       )}

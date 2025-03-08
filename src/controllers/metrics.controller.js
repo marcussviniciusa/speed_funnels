@@ -123,40 +123,87 @@ exports.getGoogleMetrics = async (req, res, next) => {
 };
 
 /**
- * Listar contas de anúncios do Meta
+ * Listar contas de anúncios do Meta para uma empresa específica
  */
 exports.getMetaAdAccounts = async (req, res, next) => {
   try {
     const userId = req.user.id;
+    const { companyId } = req.params;
     
-    // Buscar conexão ativa com Meta
-    const connection = await ApiConnection.findOne({
+    if (!companyId) {
+      return res.status(400).json({
+        success: false,
+        error: 'ID da empresa é obrigatório'
+      });
+    }
+    
+    console.log(`Buscando contas de anúncios do Meta para empresa ${companyId}`);
+    
+    // Buscar conexões ativas com Meta para esta empresa
+    const connections = await ApiConnection.findAll({
       where: {
         platform: 'meta',
-        isActive: true
+        is_active: true,
+        user_id: userId,
+        company_id: companyId
       }
     });
     
-    if (!connection) {
-      throw createError(404, 'Não foi encontrada uma integração ativa com Meta Ads');
+    if (!connections || connections.length === 0) {
+      return res.status(404).json({
+        success: false,
+        error: 'Não foi encontrada uma integração ativa com Meta Ads para esta empresa'
+      });
     }
     
+    // Obter a primeira conexão ativa
+    const connection = connections[0];
+    
     // Verificar se o token ainda é válido
-    const isValid = await metaService.validateToken(connection.accessToken);
-    if (!isValid) {
-      throw createError(401, 'Token de acesso expirado. Por favor, reconecte sua conta Meta Ads');
+    const tokenValidation = await metaService.validateToken(connection.access_token || connection.accessToken);
+    if (!tokenValidation.isValid) {
+      return res.status(401).json({
+        success: false,
+        error: `Token de acesso inválido: ${tokenValidation.message}. Por favor, reconecte sua conta Meta Ads`
+      });
     }
     
     // Buscar contas de anúncios
-    const adAccounts = await metaService.getAdAccounts(connection.accessToken);
+    const accessToken = connection.access_token || connection.accessToken;
+    console.log(`Buscando contas de anúncios com token: ${accessToken.substring(0, 10)}...`);
+    
+    const adAccountsResponse = await metaService.getAdAccounts(accessToken);
+    
+    if (!adAccountsResponse.success) {
+      return res.status(500).json({
+        success: false,
+        error: adAccountsResponse.error || 'Falha ao obter contas de anúncios'
+      });
+    }
+    
+    // Filtrar apenas contas ativas
+    const activeAccounts = adAccountsResponse.accounts.filter(account => account.status === 'ACTIVE');
+    
+    console.log(`Encontradas ${adAccountsResponse.accounts.length} contas de anúncios, ${activeAccounts.length} ativas`);
     
     res.json({
       success: true,
-      data: adAccounts
+      data: {
+        accounts: activeAccounts,
+        total: activeAccounts.length,
+        activeConnection: {
+          id: connection.id,
+          accountId: connection.account_id || connection.accountId,
+          accountName: connection.account_name || connection.accountName
+        }
+      }
     });
   } catch (error) {
     console.error('Erro ao buscar contas de anúncios:', error);
-    next(error);
+    res.status(500).json({
+      success: false,
+      error: error.message
+    });
   }
 };
 

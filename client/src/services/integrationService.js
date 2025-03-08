@@ -48,15 +48,13 @@ const integrationService = {
   getCompanies: async () => {
     return await api.get('/api/companies');
   },
-
+  
   /**
-   * Busca as contas de anúncios do Meta para uma conexão específica
-   * @param {string} connectionId - ID da conexão
+   * Busca as contas de anúncios do Meta para uma empresa específica
+   * @param {string} companyId - ID da empresa
    */
-  getMetaAdAccounts: async (connectionId) => {
-    return await api.get('/api/integrations/meta/ad-accounts', {
-      params: { connectionId }
-    });
+  getMetaAdAccounts: async (companyId) => {
+    return await api.get(`/api/metrics/meta/accounts/company/${companyId}`);
   },
 
   /**

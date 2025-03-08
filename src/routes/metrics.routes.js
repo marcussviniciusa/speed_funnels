@@ -7,7 +7,7 @@ const { authenticate } = require('../middlewares/auth.middleware');
 router.use(authenticate);
 
 // Rotas para métricas do Meta Ads
-router.get('/meta/accounts', metricsController.getMetaAdAccounts);
+router.get('/meta/accounts/company/:companyId', metricsController.getMetaAdAccounts);
 router.get('/meta/:adAccountId', metricsController.getMetaMetrics);
 
 // Rotas para métricas do Google Analytics

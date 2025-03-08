@@ -2,40 +2,68 @@ const axios = require('axios');
 const { ApiConnection } = require('../models');
 const createError = require('http-errors');
 
-const META_API_VERSION = 'v17.0';
+const META_API_VERSION = 'v22.0';
 const META_BASE_URL = `https://graph.facebook.com/${META_API_VERSION}`;
 
 // Função auxiliar para esperar um intervalo de tempo
 const sleep = (ms) => new Promise(resolve => setTimeout(resolve, ms));
 
 // Obter configuração de request delay do arquivo .env
-const META_REQUEST_DELAY = parseInt(process.env.META_REQUEST_DELAY || 5000);
+const META_REQUEST_DELAY = parseInt(process.env.META_REQUEST_DELAY || 1000);
 const META_MAX_RETRIES = parseInt(process.env.META_MAX_RETRIES || 5);
-const META_INITIAL_BACKOFF = parseInt(process.env.META_INITIAL_BACKOFF || 10000);
+const META_INITIAL_BACKOFF = parseInt(process.env.META_INITIAL_BACKOFF || 30000);
 
-// Sistema de gestão de taxa de requisições (Token Bucket)
+// Controle de limites e informações sobre a API do Meta
+const META_RATE_LIMITS = {
+  // Limites gerais da API do Meta para aplicações em modo de desenvolvimento
+  // https://developers.facebook.com/docs/graph-api/overview/rate-limiting/
+  GLOBAL_RATE: {
+    // Limites por aplicação e token
+    APP_LEVEL: 200,     // Requisições por hora por aplicação
+    USER_LEVEL: 200,    // Requisições por hora por usuário
+  },
+  // Limites específicos para contas de anúncios (geralmente mais baixos)
+  ACCOUNT_RATE: 25,     // Requisições por minuto por conta de anúncios
+  ACCOUNT_DAILY: 4000,  // Requisições diárias por conta de anúncios
+};
+
+// Sistema de gestão de taxa de requisições (Token Bucket) aprimorado
 const requestTokens = {
   // Rastreamento de tokens por conta de anúncio
   accounts: {},
   
   // Rastreamento de tokens globais
   global: {
-    tokens: 50,            // Tokens disponíveis
+    tokens: 20,             // Tokens disponíveis
     lastRefill: Date.now(), // Último reabastecimento
-    maxTokens: 50,          // Máximo de tokens
-    refillRate: 10000       // Taxa de reabastecimento em ms (10s)
+    maxTokens: 20,          // Máximo de tokens
+    refillRate: 90000,      // Taxa de reabastecimento em ms (90s = 20 tokens por 90s = 800/hora)
+    waitingQueue: [],       // Fila de espera para requisições pendentes
   },
   
   // Inicializar bucket para uma conta específica
   initAccount(accountId) {
     if (!this.accounts[accountId]) {
       this.accounts[accountId] = {
-        tokens: 10,          // Tokens disponíveis por conta
+        tokens: 3,           // Tokens disponíveis por conta
         lastRefill: Date.now(),
-        maxTokens: 10,        // Máximo de tokens por conta
-        refillRate: 60000     // Taxa de reabastecimento em ms (60s)
+        maxTokens: 3,        // Máximo de tokens por conta
+        refillRate: 120000,  // Taxa de reabastecimento em ms (120s = 3 tokens por 2 minutos = 90/hora)
+        waitingQueue: [],    // Fila de espera
+        dailyRequests: 0,    // Contador diário
+        dailyResetTime: Date.now() + 86400000, // Próximo reset diário (24h)
       };
     }
+    
+    // Verificar se mudou o dia e resetar o contador diário
+    const now = Date.now();
+    const todayStart = new Date().setHours(0, 0, 0, 0);
+    
+    if (this.accounts[accountId].dailyResetTime < todayStart) {
+      this.accounts[accountId].dailyRequests = 0;
+      this.accounts[accountId].dailyResetTime = todayStart + 86400000; // +24h
+    }
+    
     return this.accounts[accountId];
   },
   
@@ -43,39 +71,95 @@ const requestTokens = {
   refill(bucket) {
     const now = Date.now();
     const timePassed = now - bucket.lastRefill;
-    const newTokens = Math.floor(timePassed / bucket.refillRate) * bucket.maxTokens;
+    const refillAmount = (timePassed / bucket.refillRate);
     
-    if (newTokens > 0) {
-      bucket.tokens = Math.min(bucket.maxTokens, bucket.tokens + newTokens);
-      bucket.lastRefill = now;
+    if (refillAmount >= 0.1) { // Só atualiza se passou pelo menos 10% do tempo de reabastecimento
+      const newTokens = Math.floor(refillAmount * bucket.maxTokens);
+      
+      if (newTokens > 0) {
+        bucket.tokens = Math.min(bucket.maxTokens, bucket.tokens + newTokens);
+        bucket.lastRefill = now - (timePassed % bucket.refillRate); // Preserva o resto do tempo
+        
+        // Processar fila de espera se houver tokens disponíveis
+        this.processWaitingQueue(bucket);
+      }
     }
   },
   
-  // Consumir um token (retorna true se disponível)
-  consume(accountId = null) {
-    // Sempre verifica o bucket global
-    this.refill(this.global);
-    
-    if (this.global.tokens <= 0) {
-      return false;
+  // Processar fila de espera
+  processWaitingQueue(bucket) {
+    while (bucket.tokens > 0 && bucket.waitingQueue.length > 0) {
+      const resolve = bucket.waitingQueue.shift();
+      bucket.tokens--;
+      resolve();
     }
-    
-    // Se temos uma conta específica, verificar também
-    if (accountId) {
-      const accountBucket = this.initAccount(accountId);
-      this.refill(accountBucket);
+  },
+  
+  // Consumir um token (retorna Promise)
+  async consume(accountId = null) {
+    return new Promise(async (resolve) => {
+      // Sempre verifica o bucket global
+      this.refill(this.global);
       
-      if (accountBucket.tokens <= 0) {
-        return false;
+      // Se temos uma conta específica, verificar também
+      let accountBucket = null;
+      if (accountId) {
+        accountBucket = this.initAccount(accountId);
+        this.refill(accountBucket);
+        
+        // Verificar se atingimos o limite diário
+        if (accountBucket.dailyRequests >= META_RATE_LIMITS.ACCOUNT_DAILY) {
+          console.log(`Limite diário atingido para conta ${accountId}: ${accountBucket.dailyRequests}/${META_RATE_LIMITS.ACCOUNT_DAILY}`);
+          
+          // Espera até o próximo dia
+          const now = new Date();
+          const tomorrow = new Date(now);
+          tomorrow.setDate(now.getDate() + 1);
+          tomorrow.setHours(0, 0, 0, 0);
+          
+          const waitTime = tomorrow - now;
+          console.log(`Aguardando até amanhã (${waitTime/1000}s) para resetar limite diário da conta ${accountId}`);
+          
+          await sleep(Math.min(waitTime, 3600000)); // Espera no máximo 1 hora e tenta novamente
+          resolve(false);
+          return;
+        }
       }
       
-      // Consumir token da conta
-      accountBucket.tokens--;
-    }
-    
-    // Consumir token global
-    this.global.tokens--;
-    return true;
+      // Se não há tokens disponíveis globalmente ou para a conta específica
+      if (this.global.tokens <= 0 || (accountId && accountBucket.tokens <= 0)) {
+        const priorityQueue = accountId ? accountBucket.waitingQueue : this.global.waitingQueue;
+        
+        // Adicionar à fila de espera
+        priorityQueue.push(resolve);
+        
+        // Log do estado atual
+        console.log(`Aguardando token${accountId ? ` para conta ${accountId}` : ' global'}: ${
+          accountId ? 
+          `${accountBucket.tokens}/${accountBucket.maxTokens} (conta), ${this.global.tokens}/${this.global.maxTokens} (global)` : 
+          `${this.global.tokens}/${this.global.maxTokens}`
+        }`);
+        
+        // Calcular tempo estimado de espera
+        const waitingTime = priorityQueue.length * (accountId ? 
+          Math.max(accountBucket.refillRate, this.global.refillRate) / accountBucket.maxTokens : 
+          this.global.refillRate / this.global.maxTokens);
+          
+        console.log(`Fila de espera: ${priorityQueue.length} requisições, tempo estimado: ${Math.ceil(waitingTime/1000)}s`);
+        return;
+      }
+      
+      // Consumir tokens
+      this.global.tokens--;
+      
+      if (accountId) {
+        accountBucket.tokens--;
+        accountBucket.dailyRequests++;
+        console.log(`Requisição #${accountBucket.dailyRequests} para conta ${accountId}`);
+      }
+      
+      resolve(true);
+    });
   }
 };
 
@@ -85,35 +169,70 @@ const retryWithBackoff = async (fn, accountId = null, maxRetries = META_MAX_RETR
   
   while (true) {
     try {
-      // Verifica se há tokens disponíveis
-      if (!requestTokens.consume(accountId)) {
-        const waitTime = accountId ? 
-          Math.max(requestTokens.global.refillRate, requestTokens.accounts[accountId].refillRate) : 
-          requestTokens.global.refillRate;
-          
-        console.log(`Limite de requisições preventivo atingido. Aguardando ${waitTime/1000}s antes de tentar...`);
-        await sleep(waitTime);
+      // Verifica se há tokens disponíveis - isso já inclui a espera em fila se necessário
+      const hasToken = await requestTokens.consume(accountId);
+      if (!hasToken) {
+        console.log(`Não foi possível obter token para requisição. Tentando novamente...`);
+        await sleep(5000); // Pequena pausa antes de tentar novamente
         continue;
       }
       
       // Espera do delay entre requisições
       await sleep(META_REQUEST_DELAY);
       
-      return await fn();
+      // Executa a função
+      const result = await fn();
+      return result;
     } catch (error) {
       // Verificar se é erro de limite de requisições
       const isRateLimitError = 
         error.response?.data?.error?.code === 17 || 
+        error.response?.data?.error?.error_subcode === 2446079 ||
         error.response?.data?.error?.message?.includes('limit') ||
+        error.response?.data?.error?.message?.includes('User request limit reached') ||
         error.response?.status === 429;
       
+      // Log detalhado do erro
+      if (isRateLimitError) {
+        console.log(`Erro de limite de requisição detectado:`);
+        console.log(`- Código: ${error.response?.data?.error?.code}`);
+        console.log(`- Subcódigo: ${error.response?.data?.error?.error_subcode}`);
+        console.log(`- Mensagem: ${error.response?.data?.error?.message}`);
+        
+        // Verificar cabeçalhos específicos de uso da API
+        const appUsage = error.response?.headers?.['x-app-usage'];
+        const adAccountUsage = error.response?.headers?.['x-ad-account-usage'];
+        
+        if (appUsage) {
+          try {
+            const usage = JSON.parse(appUsage);
+            console.log(`- Uso da API: ${JSON.stringify(usage)}`);
+          } catch (e) {
+            console.log(`- Uso da API (formato inválido): ${appUsage}`);
+          }
+        }
+        
+        if (adAccountUsage) {
+          try {
+            const usage = JSON.parse(adAccountUsage);
+            console.log(`- Uso da conta: ${JSON.stringify(usage)}`);
+          } catch (e) {
+            console.log(`- Uso da conta (formato inválido): ${adAccountUsage}`);
+          }
+        }
+      } else {
+        console.error(`Erro não relacionado a limite de requisições: ${error.message}`);
+      }
+      
+      // Se excedeu tentativas ou não é erro de rate limit, propaga o erro
       if (retries >= maxRetries || !isRateLimitError) {
         throw error;
       }
       
       // Backoff exponencial com jitter para evitar sincronização de requisições
       const jitter = Math.random() * 0.3 + 0.85; // 0.85-1.15
-      const delay = initialDelay * Math.pow(2, retries) * jitter;
+      const delay = initialDelay * Math.pow(4, retries) * jitter; // Backoff mais agressivo (base 4)
+      
       console.log(`Limite de requisições atingido. Aguardando ${Math.round(delay/1000)}s antes de tentar novamente... (Tentativa ${retries + 1}/${maxRetries})`);
       await sleep(delay);
       retries++;
@@ -123,7 +242,56 @@ const retryWithBackoff = async (fn, accountId = null, maxRetries = META_MAX_RETR
 
 // Função centralizada para fazer requisições para a API do Meta com controle de taxa
 const makeMetaApiRequest = async (accountId, requestFn) => {
-  return await retryWithBackoff(requestFn, accountId);
+  // Obter ou inicializar bucket de conta específica
+  const accountBucket = accountId ? requestTokens.initAccount(accountId) : null;
+  
+  // Verificar limite diário para a conta
+  if (accountId && accountBucket) {
+    // Reset do contador diário se necessário
+    if (Date.now() > accountBucket.dailyResetTime) {
+      accountBucket.dailyRequests = 0;
+      accountBucket.dailyResetTime = Date.now() + 86400000; // +24h
+    }
+    
+    // Verificar se atingiu o limite diário
+    if (accountBucket.dailyRequests >= META_RATE_LIMITS.ACCOUNT_DAILY) {
+      throw new Error(`Limite diário de requisições atingido para a conta ${accountId}`);
+    }
+  }
+  
+  // Consumir token global
+  await requestTokens.consume(null);
+  
+  // Se tiver ID de conta, consumir token da conta também
+  if (accountId) {
+    await requestTokens.consume(accountId);
+  }
+  
+  try {
+    // Adicionar um pequeno atraso entre requisições para evitar rajadas
+    await sleep(META_REQUEST_DELAY * (1 + Math.random() * 0.5));
+    
+    const response = await requestFn();
+    
+    // Incrementar contador de requisições diárias
+    if (accountId && accountBucket) {
+      accountBucket.dailyRequests++;
+    }
+    
+    return response;
+    
+  } catch (error) {
+    // Ajustar os tokens com base no erro
+    if (error.response?.data?.error?.code === 17 || error.response?.status === 429) {
+      // Se for erro de limite de taxa, reduzir tokens disponíveis para impedir novas requisições por um tempo
+      if (accountId && requestTokens.accounts[accountId]) {
+        requestTokens.accounts[accountId].tokens = 0;
+      }
+      requestTokens.global.tokens = Math.min(requestTokens.global.tokens, 3);
+    }
+    
+    throw error;
+  }
 };
 
 // Configurações do Meta OAuth
@@ -205,753 +373,557 @@ exports.getUserInfo = async (accessToken) => {
         },
       });
     });
-    
-    console.log('Resposta do Meta para informações do usuário:', JSON.stringify(response.data, null, 2));
-    
-    return response.data;
-  } catch (error) {
-    console.error('Erro ao obter informações do usuário Meta:', error.response?.data || error.message);
-    throw createError(500, 'Erro ao obter dados do usuário Meta');
-  }
-};
 
-// Obter contas de anúncios disponíveis
-exports.getAdAccounts = async (accessToken) => {
-  verifyConfig();
-  
-  console.log('Solicitando contas de anúncios');
-  
-  try {
-    // Usamos o ID global para este endpoint pois estamos consultando /me/
-    const response = await makeMetaApiRequest(null, async () => {
-      return await axios.get(`${META_BASE_URL}/me/adaccounts`, {
-        params: {
-          access_token: accessToken,
-          fields: 'id,name,account_id,account_status,business_name,currency',
-          limit: 25,
-        },
-      });
-    });
-    
-    console.log('Resposta do Meta para contas de anúncios:', JSON.stringify(response.data, null, 2));
-    
-    // Normalizar os dados para facilitar o uso no frontend
-    const accounts = response.data.data.map(account => ({
-      id: account.id, // Mantém o formato completo (act_XXXXX)
-      accountId: account.account_id, // ID numérico puro
-      name: account.name,
-      status: account.account_status,
-      businessName: account.business_name || '',
-      currency: account.currency
-    }));
-    
-    return accounts;
-  } catch (error) {
-    console.error('Erro ao obter contas de anúncios:', error.response?.data || error.message);
-    throw createError(500, 'Erro ao obter contas de anúncios Meta');
-  }
-};
-
-// Buscar métricas de campanhas
-exports.getCampaignMetrics = async (accessToken, adAccountId, dateRange) => {
-  verifyConfig();
-  
-  // Remove o prefixo 'act_' se já estiver presente no ID da conta
-  const formattedAccountId = adAccountId.startsWith('act_') ? adAccountId : `act_${adAccountId}`;
-  
-  // Extrair ID da conta para rastreamento de tokens
-  const accountIdMatch = formattedAccountId.match(/act_(\d+)/);
-  const accountId = accountIdMatch ? accountIdMatch[1] : formattedAccountId.replace('act_', '');
-  
-  console.log('Solicitando métricas de campanhas');
-  console.log('Conta de anúncios formatada:', formattedAccountId);
-  console.log('Período:', dateRange);
-  
-  try {
-    const { startDate, endDate } = dateRange;
-    
-    const response = await makeMetaApiRequest(accountId, async () => {
-      return await axios.get(`${META_BASE_URL}/${formattedAccountId}/insights`, {
-        params: {
-          access_token: accessToken,
-          time_range: JSON.stringify({ since: startDate, until: endDate }),
-          level: 'campaign',
-          fields: 'campaign_name,spend,impressions,clicks,reach,cpm,ctr,cost_per_result',
-        },
-      });
-    });
-    
-    console.log(`Métricas recebidas para ${response.data.data?.length || 0} campanhas`);
-    
-    return response.data.data || [];
-  } catch (error) {
-    console.error('Erro ao obter métricas de campanhas:', error.response?.data || error.message);
-    throw createError(500, 'Erro ao obter métricas de campanhas Meta');
-  }
-};
-
-// Buscar métricas diárias
-exports.getDailyMetrics = async (accessToken, adAccountId, dateRange) => {
-  verifyConfig();
-  
-  // Remove o prefixo 'act_' se já estiver presente no ID da conta
-  const formattedAccountId = adAccountId.startsWith('act_') ? adAccountId : `act_${adAccountId}`;
-  
-  // Extrair ID da conta para rastreamento de tokens
-  const accountIdMatch = formattedAccountId.match(/act_(\d+)/);
-  const accountId = accountIdMatch ? accountIdMatch[1] : formattedAccountId.replace('act_', '');
-  
-  console.log('Solicitando métricas diárias');
-  console.log('Conta de anúncios formatada:', formattedAccountId);
-  console.log('Período:', dateRange);
-  
-  try {
-    const { startDate, endDate } = dateRange;
-    
-    const response = await makeMetaApiRequest(accountId, async () => {
-      return await axios.get(`${META_BASE_URL}/${formattedAccountId}/insights`, {
-        params: {
-          access_token: accessToken,
-          time_range: JSON.stringify({ since: startDate, until: endDate }),
-          time_increment: 1, // Dados diários
-          level: 'account',
-          fields: 'date_start,spend,impressions,clicks,ctr,cpc,actions',
-        },
-      });
-    });
-    
-    console.log(`Métricas diárias recebidas: ${response.data.data?.length || 0} registros`);
-    
-    return response.data.data || [];
-  } catch (error) {
-    console.error('Erro ao obter métricas diárias:', error.response?.data || error.message);
-    throw createError(500, 'Erro ao obter métricas diárias Meta');
-  }
-};
-
-// Verificar se token ainda é válido
-exports.validateToken = async (accessToken) => {
-  verifyConfig();
-  
-  console.log('Verificando token de acesso');
-  
-  try {
-    // Primeiro tentar usar o token para obter informações do usuário em vez de usar debug_token
-    // Isso evita problemas de incompatibilidade de App ID
-    try {
-      const userInfoResponse = await makeMetaApiRequest(null, async () => {
-        return await axios.get(`${META_BASE_URL}/me`, {
-          params: {
-            access_token: accessToken,
-            fields: 'id,name',
-          },
-        });
-      });
-      
-      // Se conseguir obter informações do usuário, o token é válido
-      console.log('Token válido, conseguiu obter informações do usuário');
-      return {
-        valid: true,
-        expiresAt: new Date(Date.now() + 60 * 24 * 60 * 60 * 1000), // Estimar validade de 60 dias
-      };
-    } catch (userInfoError) {
-      // Se falhar, tentar usar o debug_token
-      console.log('Falha ao validar token via userInfo, tentando debug_token');
-      
-      const response = await makeMetaApiRequest(null, async () => {
-        return await axios.get(`${META_BASE_URL}/debug_token`, {
-          params: {
-            input_token: accessToken,
-            access_token: `${META_APP_ID}|${META_APP_SECRET}`,
-          },
-        });
-      });
-      
-      console.log('Resposta do Meta para validação de token:', JSON.stringify(response.data, null, 2));
-      
-      return {
-        valid: response.data.data.is_valid,
-        expiresAt: new Date(response.data.data.expires_at * 1000),
-      };
-    }
-  } catch (error) {
-    console.error('Erro ao validar token Meta:', error.response?.data || error.message);
-    return { valid: false };
-  }
-};
-
-// Renovar token de acesso
-exports.refreshAccessToken = async (refreshToken) => {
-  verifyConfig();
-  
-  try {
-    console.log('Renovando token de acesso');
-    
-    // Meta não suporta refresh tokens da mesma forma que outros serviços
-    // Esse é apenas um esboço para consistência da API
-    console.log('Refresh tokens não são suportados pelo Meta no momento');
+    console.log('Token válido, conseguiu obter informações do usuário');
     
     return {
-      success: false,
-      message: 'Refresh tokens não são suportados pelo Meta, use o fluxo de autorização completo'
+      id: response.data.id,
+      name: response.data.name,
+      email: response.data.email,
     };
   } catch (error) {
-    console.error('Erro ao renovar token Meta:', error.response?.data || error.message);
-    return { success: false, error: error.message };
+    console.error('Erro ao obter informações do usuário Meta:', error.response?.data || error.message);
+    throw createError(500, 'Erro ao obter informações do usuário Meta: ' + (error.response?.data?.error?.message || error.message));
   }
 };
 
-// Função para obter campanhas de uma conta de anúncios
-exports.getCampaigns = async (accessToken, adAccountId) => {
-  verifyConfig();
+// Cache para armazenar respostas da API e reduzir chamadas repetidas
+const responseCache = {
+  data: {},
   
-  console.log(`Buscando campanhas para a conta ${adAccountId}`);
+  // Define o tempo de vida do cache com base no tipo de dado
+  TTL: {
+    default: 3600000,  // 60 minutos
+    campaigns: 7200000, // 2 horas
+    adsets: 7200000,   // 2 horas
+    ads: 7200000,      // 2 horas
+    insights: 3600000, // 60 minutos
+  },
   
-  // Extrair ID da conta para rastreamento de tokens
-  const accountIdMatch = adAccountId.match(/act_(\d+)/);
-  const accountId = accountIdMatch ? accountIdMatch[1] : adAccountId.replace('act_', '');
+  // Gera uma chave baseada nos parâmetros da requisição
+  generateKey(endpoint, params) {
+    const paramString = JSON.stringify(params);
+    return `${endpoint}:${paramString}`;
+  },
   
-  try {
-    const response = await makeMetaApiRequest(accountId, async () => {
-      return await axios.get(`${META_BASE_URL}/${adAccountId}/campaigns`, {
-        params: {
-          access_token: accessToken,
-          fields: 'id,name,status,objective,spend_cap,lifetime_budget,daily_budget,start_time,stop_time,created_time,updated_time',
-          limit: 50  // Reduzido para evitar atingir limites de dados
+  // Verifica se há um valor válido no cache
+  get(endpoint, params) {
+    const key = this.generateKey(endpoint, params);
+    const cachedItem = this.data[key];
+    
+    if (!cachedItem) return null;
+    
+    // Verificar se o cache expirou
+    const now = Date.now();
+    const cacheType = endpoint.includes('insights') ? 'insights' : 
+                    endpoint.includes('campaigns') ? 'campaigns' :
+                    endpoint.includes('adsets') ? 'adsets' :
+                    endpoint.includes('ads') ? 'ads' : 'default';
+    
+    if (now - cachedItem.timestamp > this.TTL[cacheType]) {
+      // Cache expirado, remover
+      delete this.data[key];
+      return null;
+    }
+    
+    console.log(`Usando resposta em cache para ${endpoint}`);
+    return cachedItem.data;
+  },
+  
+  // Armazena um valor no cache
+  set(endpoint, params, data) {
+    const key = this.generateKey(endpoint, params);
+    this.data[key] = {
+      data,
+      timestamp: Date.now()
+    };
+  },
+  
+  // Limpa entradas de cache específicas ou todo o cache
+  clear(endpoint = null, params = null) {
+    if (!endpoint) {
+      // Limpar todo o cache
+      this.data = {};
+      return;
+    }
+    
+    // Limpar entradas específicas
+    if (params) {
+      const key = this.generateKey(endpoint, params);
+      delete this.data[key];
+    } else {
+      // Limpar todas as entradas que começam com o endpoint
+      Object.keys(this.data).forEach(key => {
+        if (key.startsWith(`${endpoint}:`)) {
+          delete this.data[key];
         }
       });
-    });
-    
-    return response.data.data || [];
-  } catch (error) {
-    console.error('Erro ao buscar campanhas:', error.response?.data || error.message);
-    throw error;
+    }
   }
 };
 
-// Função para obter conjuntos de anúncios (adsets) de uma campanha
+// Função para obter conjuntos de anúncios (Ad Sets) de uma campanha
 exports.getAdSets = async (accessToken, campaignId) => {
-  verifyConfig();
-  
-  console.log(`Buscando conjuntos de anúncios para a campanha ${campaignId}`);
-  
-  // Extrair ID da conta do campaignId (formato: act_XXXXX/campaigns/YYYYY)
-  const accountIdMatch = campaignId.match(/act_(\d+)\//);
-  const accountId = accountIdMatch ? accountIdMatch[1] : null;
-  
   try {
+    // Verificar se temos dados em cache
+    const cachedData = responseCache.get(`${campaignId}/adsets`, {
+      access_token: accessToken,
+      fields: 'id,name,status,campaign_id,daily_budget,lifetime_budget,targeting,optimization_goal,bid_amount,bid_strategy',
+      limit: 50
+    });
+    
+    if (cachedData) {
+      return cachedData;
+    }
+    
+    // Extrair o ID da conta a partir do ID da campanha (geralmente act_XXXXX é o prefixo do ID da campanha)
+    const accountIdMatch = campaignId.match(/act_(\d+)/);
+    const accountId = accountIdMatch ? accountIdMatch[0] : null;
+    
     const response = await makeMetaApiRequest(accountId, async () => {
       return await axios.get(`${META_BASE_URL}/${campaignId}/adsets`, {
         params: {
           access_token: accessToken,
           fields: 'id,name,status,campaign_id,daily_budget,lifetime_budget,targeting,optimization_goal,bid_amount,bid_strategy',
-          limit: 50  // Reduzido para evitar atingir limites de dados
+          limit: 50
         }
       });
     });
     
-    return response.data.data || [];
+    // Armazenar resposta em cache
+    responseCache.set(`${campaignId}/adsets`, {
+      access_token: accessToken,
+      fields: 'id,name,status,campaign_id,daily_budget,lifetime_budget,targeting,optimization_goal,bid_amount,bid_strategy',
+      limit: 50
+    }, response.data);
+    
+    return response.data;
   } catch (error) {
-    console.error('Erro ao buscar conjuntos de anúncios:', error.response?.data || error.message);
+    console.error('Erro ao buscar conjuntos de anúncios:', error.response?.data || error);
     throw error;
   }
 };
 
-// Função para obter anúncios de um conjunto de anúncios
-exports.getAds = async (accessToken, adsetId) => {
-  verifyConfig();
-  
-  console.log(`Buscando anúncios para o conjunto ${adsetId}`);
-  
-  // Extrair ID da conta do adsetId (formato: act_XXXXX/adsets/YYYYY)
-  const accountIdMatch = adsetId.match(/act_(\d+)\//);
-  const accountId = accountIdMatch ? accountIdMatch[1] : null;
-  
+// Função para obter dados de insights (métricas) de uma campanha
+exports.getCampaignInsights = async (accessToken, campaignId, timeRange = 'last_30d') => {
   try {
+    // Verificar se temos dados em cache
+    const cachedData = responseCache.get(`${campaignId}/insights`, {
+      access_token: accessToken,
+      time_range: timeRange,
+      fields: 'impressions,clicks,spend,cpc,ctr,cpp,reach,frequency',
+      level: 'campaign'
+    });
+    
+    if (cachedData) {
+      return cachedData;
+    }
+    
+    // Extrair o ID da conta a partir do ID da campanha
+    const accountIdMatch = campaignId.match(/act_(\d+)/);
+    const accountId = accountIdMatch ? accountIdMatch[0] : null;
+    
     const response = await makeMetaApiRequest(accountId, async () => {
-      return await axios.get(`${META_BASE_URL}/${adsetId}/ads`, {
+      return await axios.get(`${META_BASE_URL}/${campaignId}/insights`, {
         params: {
           access_token: accessToken,
-          fields: 'id,name,status,adset_id,creative',
-          limit: 50  // Reduzido para evitar atingir limites de dados
+          time_range: timeRange,
+          fields: 'impressions,clicks,spend,cpc,ctr,cpp,reach,frequency',
+          level: 'campaign'
         }
       });
     });
     
-    return response.data.data || [];
+    // Armazenar resposta em cache
+    responseCache.set(`${campaignId}/insights`, {
+      access_token: accessToken,
+      time_range: timeRange,
+      fields: 'impressions,clicks,spend,cpc,ctr,cpp,reach,frequency',
+      level: 'campaign'
+    }, response.data);
+    
+    return response.data;
   } catch (error) {
-    console.error('Erro ao buscar anúncios:', error.response?.data || error.message);
+    console.error(`Erro ao buscar insights para campaign ${campaignId}:`, error.response?.data || error);
     throw error;
   }
 };
 
-// Função para obter métricas de desempenho de anúncios
-exports.getAdInsights = async (accessToken, adObjectId, datePreset = 'last_30d', level = 'ad') => {
-  verifyConfig();
-  
-  console.log(`Buscando insights para ${level} ${adObjectId} no período ${datePreset}`);
-  
-  // Extrair ID da conta do adObjectId
-  const accountIdMatch = adObjectId.match(/act_(\d+)\//);
-  const accountId = accountIdMatch ? accountIdMatch[1] : null;
-  
+// Função para obter campanhas de uma conta de anúncios
+exports.getCampaigns = async (accessToken, adAccountId) => {
   try {
-    const response = await makeMetaApiRequest(accountId, async () => {
-      return await axios.get(`${META_BASE_URL}/${adObjectId}/insights`, {
+    // Verificar se temos dados em cache
+    const cachedData = responseCache.get(`${adAccountId}/campaigns`, {
+      access_token: accessToken,
+      fields: 'id,name,status,objective,buying_type,daily_budget,lifetime_budget',
+      limit: 50
+    });
+    
+    if (cachedData) {
+      return cachedData;
+    }
+    
+    const response = await makeMetaApiRequest(adAccountId, async () => {
+      return await axios.get(`${META_BASE_URL}/${adAccountId}/campaigns`, {
         params: {
           access_token: accessToken,
-          fields: 'impressions,clicks,spend,reach,frequency,cpc,cpm,ctr,conversions,cost_per_conversion,actions,action_values',
-          level: level,
-          date_preset: datePreset,
-          limit: 50  // Reduzido para evitar atingir limites de dados
+          fields: 'id,name,status,objective,buying_type,daily_budget,lifetime_budget',
+          limit: 50
         }
       });
     });
     
-    return response.data.data || [];
+    // Armazenar resposta em cache
+    responseCache.set(`${adAccountId}/campaigns`, {
+      access_token: accessToken,
+      fields: 'id,name,status,objective,buying_type,daily_budget,lifetime_budget',
+      limit: 50
+    }, response.data);
+    
+    return response.data;
   } catch (error) {
-    console.error('Erro ao buscar insights de anúncios:', error.response?.data || error.message);
-    // Retorna array vazio em caso de erro em vez de propagar o erro
-    return [];
+    console.error('Erro ao buscar campanhas:', error.response?.data || error);
+    throw error;
   }
 };
 
-// Função para sincronizar todos os dados de anúncios de uma conta
+// Função para obter contas de anúncios disponíveis para o usuário
+exports.getAdAccounts = async (accessToken) => {
+  try {
+    if (!accessToken) {
+      throw new Error('Token de acesso é obrigatório para buscar contas de anúncios');
+    }
+    
+    console.log('Obtendo contas de anúncios do usuário');
+    
+    const accounts = await makeMetaApiRequest(null, async () => {
+      return await axios.get(`${META_BASE_URL}/me/adaccounts`, {
+        params: {
+          access_token: accessToken,
+          fields: 'id,name,account_status,amount_spent,balance,currency,funding_source,account_id,business,business_city,business_country_code,created_time',
+          limit: 100
+        }
+      });
+    });
+    
+    if (!accounts || !accounts.data || !accounts.data.data) {
+      console.error('Falha ao buscar contas de anúncios');
+      return { success: false, error: 'Falha ao buscar contas de anúncios' };
+    }
+    
+    const adAccounts = accounts.data.data.map(account => ({
+      id: account.id,
+      name: account.name,
+      accountId: account.id,
+      status: account.account_status === 1 ? 'ACTIVE' : 'INACTIVE',
+      amountSpent: account.amount_spent,
+      balance: account.balance,
+      currency: account.currency,
+      businessId: account.business ? account.business.id : null,
+      businessName: account.business ? account.business.name : null,
+      createdTime: account.created_time
+    }));
+    
+    const activeAccounts = adAccounts.filter(account => account.status === 'ACTIVE');
+    console.log(`Encontradas ${adAccounts.length} contas de anúncios, das quais ${activeAccounts.length} estão ativas`);
+    
+    return {
+      success: true,
+      accounts: adAccounts
+    };
+  } catch (error) {
+    console.error('Erro ao buscar contas de anúncios:', error.message);
+    return {
+      success: false,
+      error: error.message
+    };
+  }
+}
+
+// Função para sincronizar dados de uma conta de anúncios
 exports.syncAdAccountData = async (connection) => {
-  const { AdData } = require('../models');
-  const { Sequelize } = require('sequelize');
-  
   try {
+    // Verificar se temos um ID de conta válido
+    if (!connection.accountId) {
+      console.warn(`Pulando conexão ${connection.id} pois não possui ID de conta de anúncio válido`);
+      return {
+        success: false,
+        error: 'ID de conta de anúncio não fornecido'
+      };
+    }
+
     console.log(`Iniciando sincronização de dados para conexão ${connection.id} (Conta: ${connection.accountId})`);
     
-    // Validar o token antes de prosseguir
+    // Verificar o token de acesso
+    console.log(`Verificando token de acesso`);
+    if (!connection.accessToken) {
+      console.error(`Token de acesso não encontrado para conexão ${connection.id}`);
+      // Atualizar o status da conexão para inativo
+      if (connection.id) {
+        await ApiConnection.update(
+          { is_active: false },
+          { where: { id: connection.id } }
+        );
+        console.log(`Conexão ${connection.id} marcada como inativa devido à falta de token`);
+      }
+      return {
+        success: false,
+        error: 'Token de acesso não encontrado'
+      };
+    }
+
+    // Validar o token antes de fazer qualquer chamada
+    console.log(`Verificando validade do token de acesso`);
     const tokenValidation = await exports.validateToken(connection.accessToken);
-    if (!tokenValidation || !tokenValidation.valid) {
-      console.error(`Token inválido para conexão ${connection.id}`);
-      return { success: false, error: 'Token inválido ou expirado' };
+    if (!tokenValidation.isValid) {
+      console.error(`Token inválido para conexão ${connection.id}: ${tokenValidation.message}`);
+      // Atualizar o status da conexão para inativo
+      if (connection.id) {
+        await ApiConnection.update(
+          { is_active: false },
+          { where: { id: connection.id } }
+        );
+        console.log(`Conexão ${connection.id} marcada como inativa devido a token inválido`);
+      }
+      return {
+        success: false,
+        error: 'Token inválido ou expirado'
+      };
     }
     
-    // Obter campanhas
+    // Verificar se podemos obter as informações do usuário com o token
+    console.log(`Solicitando informações do usuário com token`);
+    const userInfo = await exports.getUserInfo(connection.accessToken);
+    if (!userInfo || !userInfo.id) {
+      console.error(`Não foi possível obter informações do usuário para conexão ${connection.id}`);
+      return {
+        success: false,
+        error: 'Não foi possível validar o usuário com o token fornecido'
+      };
+    }
+    console.log(`Token válido, conseguiu obter informações do usuário`);
+    
+    // Buscar campanhas para a conta
+    console.log(`Buscando campanhas para a conta ${connection.accountId}`);
     const campaigns = await exports.getCampaigns(connection.accessToken, connection.accountId);
-    console.log(`Encontradas ${campaigns.length} campanhas`);
+    if (!campaigns || !campaigns.data) {
+      console.error(`Falha ao buscar campanhas para conta ${connection.accountId}`);
+      return {
+        success: false,
+        error: 'Falha ao buscar campanhas'
+      };
+    }
+    console.log(`Encontradas ${campaigns.data.length} campanhas`);
     
-    // Data de início e fim para os insights
-    const dateEnd = new Date();
-    const dateStart = new Date();
-    dateStart.setDate(dateStart.getDate() - 30); // Últimos 30 dias
-    
-    // Para cada campanha, obter insights e salvar
-    for (const campaign of campaigns) {
-      const campaignInsights = await exports.getAdInsights(connection.accessToken, campaign.id, 'last_30d', 'campaign');
-      
-      if (campaignInsights.length > 0) {
-        const insight = campaignInsights[0];
-        
-        // Criar ou atualizar registro de dados da campanha
-        await AdData.findOrCreate({
-          where: {
-            connectionId: connection.id,
-            companyId: connection.companyId,
-            adAccountId: connection.accountId,
-            campaignId: campaign.id,
-            dateStart: dateStart,
-            dateEnd: dateEnd
-          },
-          defaults: {
-            campaignName: campaign.name,
-            status: campaign.status,
-            impressions: insight.impressions || 0,
-            clicks: insight.clicks || 0,
-            spend: insight.spend || 0,
-            reach: insight.reach || 0,
-            frequency: insight.frequency || 0,
-            cpc: insight.cpc || 0,
-            cpm: insight.cpm || 0,
-            ctr: insight.ctr || 0,
-            conversions: insight.actions?.find(a => a.action_type === 'offsite_conversion.fb_pixel_purchase')?.value || 0,
-            costPerConversion: insight.cost_per_action_type?.find(a => a.action_type === 'offsite_conversion.fb_pixel_purchase')?.value || 0,
-            lastSyncedAt: new Date(),
-            rawData: JSON.stringify(insight)
-          },
-          hooks: false
-        }).then(([record, created]) => {
-          if (!created) {
-            // Atualizar registro existente
-            return record.update({
-              campaignName: campaign.name,
-              status: campaign.status,
-              impressions: insight.impressions || 0,
-              clicks: insight.clicks || 0,
-              spend: insight.spend || 0,
-              reach: insight.reach || 0,
-              frequency: insight.frequency || 0,
-              cpc: insight.cpc || 0,
-              cpm: insight.cpm || 0,
-              ctr: insight.ctr || 0,
-              conversions: insight.actions?.find(a => a.action_type === 'offsite_conversion.fb_pixel_purchase')?.value || 0,
-              costPerConversion: insight.cost_per_action_type?.find(a => a.action_type === 'offsite_conversion.fb_pixel_purchase')?.value || 0,
-              lastSyncedAt: new Date(),
-              rawData: JSON.stringify(insight)
-            });
-          }
-        });
+    // Processar uma campanha por vez para controlar melhor a quantidade de requisições
+    for (const campaign of campaigns.data) {
+      // Se a campanha não estiver ativa, pular
+      if (campaign.status !== 'ACTIVE') {
+        continue;
       }
       
-      // Obter conjuntos de anúncios (adsets) para cada campanha
-      const adsets = await exports.getAdSets(connection.accessToken, campaign.id);
-      console.log(`Encontrados ${adsets.length} conjuntos de anúncios para campanha ${campaign.name}`);
-      
-      // Para cada adset, obter insights e salvar
-      for (const adset of adsets) {
-        const adsetInsights = await exports.getAdInsights(connection.accessToken, adset.id, 'last_30d', 'adset');
+      try {
+        // Obter insights
+        console.log(`Buscando insights para campaign ${campaign.id} no período last_30d`);
+        await exports.getCampaignInsights(connection.accessToken, campaign.id, 'last_30d');
         
-        if (adsetInsights.length > 0) {
-          const insight = adsetInsights[0];
-          
-          // Criar ou atualizar registro de dados do adset
-          await AdData.findOrCreate({
-            where: {
-              connectionId: connection.id,
-              companyId: connection.companyId,
-              adAccountId: connection.accountId,
-              campaignId: campaign.id,
-              adsetId: adset.id,
-              dateStart: dateStart,
-              dateEnd: dateEnd
-            },
-            defaults: {
-              campaignName: campaign.name,
-              adsetName: adset.name,
-              status: adset.status,
-              impressions: insight.impressions || 0,
-              clicks: insight.clicks || 0,
-              spend: insight.spend || 0,
-              reach: insight.reach || 0,
-              frequency: insight.frequency || 0,
-              cpc: insight.cpc || 0,
-              cpm: insight.cpm || 0,
-              ctr: insight.ctr || 0,
-              conversions: insight.actions?.find(a => a.action_type === 'offsite_conversion.fb_pixel_purchase')?.value || 0,
-              costPerConversion: insight.cost_per_action_type?.find(a => a.action_type === 'offsite_conversion.fb_pixel_purchase')?.value || 0,
-              lastSyncedAt: new Date(),
-              rawData: JSON.stringify(insight)
-            },
-            hooks: false
-          }).then(([record, created]) => {
-            if (!created) {
-              // Atualizar registro existente
-              return record.update({
-                campaignName: campaign.name,
-                adsetName: adset.name,
-                status: adset.status,
-                impressions: insight.impressions || 0,
-                clicks: insight.clicks || 0,
-                spend: insight.spend || 0,
-                reach: insight.reach || 0,
-                frequency: insight.frequency || 0,
-                cpc: insight.cpc || 0,
-                cpm: insight.cpm || 0,
-                ctr: insight.ctr || 0,
-                conversions: insight.actions?.find(a => a.action_type === 'offsite_conversion.fb_pixel_purchase')?.value || 0,
-                costPerConversion: insight.cost_per_action_type?.find(a => a.action_type === 'offsite_conversion.fb_pixel_purchase')?.value || 0,
-                lastSyncedAt: new Date(),
-                rawData: JSON.stringify(insight)
-              });
-            }
-          });
-        }
-        
-        // Obter anúncios para cada adset
-        const ads = await exports.getAds(connection.accessToken, adset.id);
-        console.log(`Encontrados ${ads.length} anúncios para o conjunto ${adset.name}`);
-        
-        // Para cada anúncio, obter insights e salvar
-        for (const ad of ads) {
-          const adInsights = await exports.getAdInsights(connection.accessToken, ad.id, 'last_30d', 'ad');
-          
-          if (adInsights.length > 0) {
-            const insight = adInsights[0];
-            
-            // Criar ou atualizar registro de dados do anúncio
-            await AdData.findOrCreate({
-              where: {
-                connectionId: connection.id,
-                companyId: connection.companyId,
-                adAccountId: connection.accountId,
-                campaignId: campaign.id,
-                adsetId: adset.id,
-                adId: ad.id,
-                dateStart: dateStart,
-                dateEnd: dateEnd
-              },
-              defaults: {
-                campaignName: campaign.name,
-                adsetName: adset.name,
-                adName: ad.name,
-                status: ad.status,
-                impressions: insight.impressions || 0,
-                clicks: insight.clicks || 0,
-                spend: insight.spend || 0,
-                reach: insight.reach || 0,
-                frequency: insight.frequency || 0,
-                cpc: insight.cpc || 0,
-                cpm: insight.cpm || 0,
-                ctr: insight.ctr || 0,
-                conversions: insight.actions?.find(a => a.action_type === 'offsite_conversion.fb_pixel_purchase')?.value || 0,
-                costPerConversion: insight.cost_per_action_type?.find(a => a.action_type === 'offsite_conversion.fb_pixel_purchase')?.value || 0,
-                lastSyncedAt: new Date(),
-                rawData: JSON.stringify(insight)
-              },
-              hooks: false
-            }).then(([record, created]) => {
-              if (!created) {
-                // Atualizar registro existente
-                return record.update({
-                  campaignName: campaign.name,
-                  adsetName: adset.name,
-                  adName: ad.name,
-                  status: ad.status,
-                  impressions: insight.impressions || 0,
-                  clicks: insight.clicks || 0,
-                  spend: insight.spend || 0,
-                  reach: insight.reach || 0,
-                  frequency: insight.frequency || 0,
-                  cpc: insight.cpc || 0,
-                  cpm: insight.cpm || 0,
-                  ctr: insight.ctr || 0,
-                  conversions: insight.actions?.find(a => a.action_type === 'offsite_conversion.fb_pixel_purchase')?.value || 0,
-                  costPerConversion: insight.cost_per_action_type?.find(a => a.action_type === 'offsite_conversion.fb_pixel_purchase')?.value || 0,
-                  lastSyncedAt: new Date(),
-                  rawData: JSON.stringify(insight)
-                });
-              }
-            });
-          }
-        }
+        // Obter ad sets
+        console.log(`Buscando conjuntos de anúncios para a campanha ${campaign.id}`);
+        await exports.getAdSets(connection.accessToken, campaign.id);
+      } catch (error) {
+        // Apenas logar erro e continuar para a próxima campanha
+        console.error(`Erro ao processar campanha ${campaign.id}:`, error.message);
       }
     }
     
-    console.log(`Sincronização concluída para conexão ${connection.id}`);
-    return { success: true };
+    return { success: true, campaignsCount: campaigns.data.length };
   } catch (error) {
     console.error(`Erro ao sincronizar dados para conexão ${connection.id}:`, error);
-    return { success: false, error: error.message };
-  }
-};
-
-/**
- * Sincroniza dados de uma conexão específica pelo ID
- * @param {number} connectionId - ID da conexão a ser sincronizada
- * @returns {Promise<Object>} Resultado da sincronização
- */
-exports.syncConnectionData = async (connectionId) => {
-  try {
-    const { ApiConnection } = require('../models');
-    
-    // Buscar a conexão específica
-    const connection = await ApiConnection.findOne({
-      where: {
-        id: connectionId,
-        platform: 'meta',
-        isActive: true
-      }
-    });
-    
-    if (!connection) {
-      return {
-        success: false,
-        error: `Conexão ID ${connectionId} não encontrada ou inativa`
-      };
-    }
-    
-    console.log(`Iniciando sincronização para conexão ID: ${connectionId}`);
-    
-    const result = await exports.syncAdAccountData(connection);
-    
-    return {
-      connectionId: connection.id,
-      accountId: connection.accountId,
-      companyId: connection.companyId,
-      success: result.success,
-      error: result.error,
-      totalProcessed: 1
-    };
-  } catch (error) {
-    console.error(`Erro ao sincronizar conexão ID ${connectionId}:`, error);
-    return {
-      connectionId,
-      success: false,
-      error: error.message,
-      totalProcessed: 0
-    };
-  }
-};
-
-/**
- * Sincroniza todas as conexões ativas de uma empresa específica
- * @param {number} companyId - ID da empresa
- * @returns {Promise<Object>} Resultados da sincronização
- */
-exports.syncCompanyConnections = async (companyId) => {
-  const { ApiConnection } = require('../models');
-  
-  // Função auxiliar para esperar um intervalo de tempo
-  const sleep = (ms) => new Promise(resolve => setTimeout(resolve, ms));
-  
-  try {
-    // Buscar todas as conexões Meta ativas da empresa específica
-    const connections = await ApiConnection.findAll({
-      where: {
-        companyId: companyId,
-        platform: 'meta',
-        isActive: true
-      }
-    });
-    
-    if (connections.length === 0) {
-      return {
-        success: false,
-        error: `Nenhuma conexão ativa do Meta encontrada para a empresa ID ${companyId}`,
-        totalProcessed: 0,
-        results: []
-      };
-    }
-    
-    console.log(`Iniciando sincronização para ${connections.length} conexões da empresa ID: ${companyId}`);
-    
-    // Sincronizar cada conexão com intervalo entre requisições para evitar limites
-    const results = [];
-    const requestDelay = process.env.META_REQUEST_DELAY || 5000;
-    
-    for (const connection of connections) {
-      try {
-        // Atrasar antes de cada sincronização para evitar limites
-        await sleep(requestDelay);
-        
-        // Sincronizar dados da conexão
-        const result = await exports.syncAdAccountData(connection);
-        
-        results.push({
-          connectionId: connection.id,
-          accountId: connection.accountId,
-          success: result.success,
-          error: result.error
-        });
-      } catch (error) {
-        console.error(`Erro ao sincronizar conexão ${connection.id} da empresa ${companyId}:`, error);
-        results.push({
-          connectionId: connection.id,
-          accountId: connection.accountId,
-          success: false,
-          error: error.message || 'Erro desconhecido'
-        });
-      }
-    }
-    
-    return {
-      companyId,
-      success: true,
-      totalProcessed: connections.length,
-      results: results
-    };
-  } catch (error) {
-    console.error(`Erro ao sincronizar conexões da empresa ${companyId}:`, error);
-    return {
-      companyId,
-      success: false,
-      error: error.message,
-      totalProcessed: 0,
-      results: []
-    };
+    return { success: false, error: error.message, connectionId: connection.id, accountId: connection.accountId };
   }
 };
 
 // Função para sincronizar dados de todas as conexões ativas
 exports.syncAllActiveConnections = async () => {
-  const { ApiConnection } = require('../models');
-  const { Sequelize } = require('sequelize');
-  
-  // Função auxiliar para esperar um intervalo de tempo
-  const sleep = (ms) => new Promise(resolve => setTimeout(resolve, ms));
-  
-  // Implementação de retry com backoff exponencial
-  const retryWithBackoff = async (fn, maxRetries = 3, initialDelay = 2000) => {
-    let retries = 0;
-    
-    while (true) {
-      try {
-        return await fn();
-      } catch (error) {
-        // Verificar se é erro de limite de requisições
-        const isRateLimitError = 
-          error.response?.data?.error?.code === 17 || 
-          error.response?.data?.error?.message?.includes('limit');
-        
-        if (retries >= maxRetries || !isRateLimitError) {
-          throw error;
-        }
-        
-        const delay = initialDelay * Math.pow(2, retries);
-        console.log(`Limite de requisições atingido. Aguardando ${delay/1000}s antes de tentar novamente...`);
-        await sleep(delay);
-        retries++;
-      }
-    }
-  };
-  
   try {
-    // Buscar todas as conexões Meta ativas
+    // Obter todas as conexões ativas
     const connections = await ApiConnection.findAll({
       where: {
-        platform: 'meta',
-        isActive: true,
-        accountId: {
-          [Sequelize.Op.not]: null
-        }
+        platform: 'meta',  // Alterado de 'facebook' para 'meta' para consistência
+        is_active: true
       }
     });
     
     console.log(`Iniciando sincronização para ${connections.length} conexões ativas`);
     
-    // Sincronizar cada conexão com intervalo entre requisições para evitar limites
+    // Para controlar melhor as chamadas de API, processamos uma conexão por vez
     const results = [];
-    const requestDelay = process.env.META_REQUEST_DELAY || 1000; // 1 segundo entre requisições por padrão
-    
     for (const connection of connections) {
       try {
-        // Atrasar antes de cada sincronização para evitar limites
-        await sleep(requestDelay);
+        // Corrigir propriedades para usar camelCase consistentemente
+        const normalizedConnection = {
+          ...connection.dataValues, // Importante: obter dataValues para ter todas as propriedades do modelo
+          id: connection.id,
+          accessToken: connection.accessToken || connection.access_token,
+          accountId: connection.accountId || connection.account_id,
+          isActive: connection.isActive || connection.is_active,
+          userId: connection.userId || connection.user_id,
+          companyId: connection.companyId || connection.company_id
+        };
+
+        // Verificar se accountId está presente
+        if (!normalizedConnection.accountId) {
+          console.warn(`Pulando conexão ${normalizedConnection.id} pois não possui ID de conta de anúncio válido`);
+          continue;
+        }
         
-        // Utilizar retry com backoff para lidar com limites de API
-        const result = await retryWithBackoff(() => exports.syncAdAccountData(connection));
+        // Adicionar um atraso deliberado entre as conexões para evitar sobrecarga
+        if (results.length > 0) {
+          const delayMs = 15000; // Aumentado para 15 segundos
+          await sleep(delayMs);
+        }
         
-        results.push({
-          connectionId: connection.id,
-          accountId: connection.accountId,
-          success: result.success,
-          error: result.error
-        });
+        console.log(`Requisição #${results.length + 1} para conta ${normalizedConnection.accountId}`);
+        
+        const result = await retryWithBackoff(
+          async () => await exports.syncAdAccountData(normalizedConnection),
+          normalizedConnection.accountId,
+          3, // Reduzido para 3 tentativas
+          60000 // Backoff inicial mais alto (60s)
+        );
+        
+        results.push(result);
       } catch (error) {
-        console.error(`Erro ao sincronizar conexão ${connection.id} após tentativas de retry:`, error);
+        console.error(`Erro ao processar conexão ${connection.id}:`, error);
         results.push({
-          connectionId: connection.id,
-          accountId: connection.accountId,
           success: false,
-          error: error.message || 'Erro desconhecido após tentativas de retry'
+          error: error.message,
+          connectionId: connection.id
         });
       }
     }
     
-    return {
-      totalProcessed: connections.length,
-      results: results
-    };
+    return results;
   } catch (error) {
     console.error('Erro ao sincronizar conexões ativas:', error);
+    throw error;
+  }
+};
+
+// Função para sincronizar uma conta do Meta para uma empresa específica
+exports.syncMetaAccountForCompany = async ({ userId, companyId, accessToken, accountId, accountName }) => {
+  try {
+    if (!userId || !companyId || !accessToken || !accountId) {
+      console.error('Parâmetros obrigatórios ausentes:', { userId, companyId, accessToken, accountId });
+      return {
+        success: false,
+        error: 'Parâmetros obrigatórios ausentes'
+      };
+    }
+
+    console.log(`Iniciando sincronização da conta ${accountId} para a empresa ${companyId}`);
+
+    // Verificar se já existe uma conexão para este usuário, empresa e conta
+    let connection = await ApiConnection.findOne({
+      where: {
+        user_id: userId,
+        company_id: companyId,
+        platform: 'meta',
+        account_id: accountId
+      }
+    });
+
+    // Se não existir, criar uma nova conexão
+    if (!connection) {
+      console.log(`Criando nova conexão Meta para usuário ${userId}, empresa ${companyId} e conta ${accountId}`);
+      connection = await ApiConnection.create({
+        user_id: userId,
+        company_id: companyId,
+        platform: 'meta',
+        access_token: accessToken,
+        account_id: accountId,
+        account_name: accountName,
+        is_active: true,
+        last_sync: new Date()
+      });
+    } else {
+      // Atualizar a conexão existente
+      console.log(`Atualizando conexão existente ID: ${connection.id}`);
+      await connection.update({
+        access_token: accessToken,
+        account_name: accountName || connection.account_name,
+        is_active: true,
+        last_sync: new Date()
+      });
+    }
+
+    // Sincronizar os dados da conta
+    const normalizedConnection = {
+      ...connection.dataValues,
+      id: connection.id,
+      accessToken: accessToken,
+      accountId: accountId,
+      userId: userId,
+      companyId: companyId
+    };
+
+    const syncResult = await exports.syncAdAccountData(normalizedConnection);
+    
     return {
-      totalProcessed: 0,
-      error: error.message,
-      results: []
+      success: syncResult.success,
+      connectionId: connection.id,
+      message: syncResult.success 
+        ? `Conta ${accountId} sincronizada com sucesso` 
+        : `Erro ao sincronizar conta: ${syncResult.error}`,
+      error: syncResult.error
+    };
+  } catch (error) {
+    console.error('Erro ao sincronizar conta para empresa:', error);
+    return {
+      success: false,
+      error: error.message
+    };
+  }
+};
+
+// Verificar se o token de acesso ainda é válido
+exports.validateToken = async (accessToken) => {
+  if (!accessToken) {
+    console.error('Token de acesso não fornecido para validação');
+    return { isValid: false, message: 'Token de acesso não fornecido' };
+  }
+  
+  try {
+    console.log('Verificando validade do token de acesso');
+    // Tentar fazer uma chamada simples para verificar se o token ainda é válido
+    const response = await axios.get(`${META_BASE_URL}/debug_token`, {
+      params: {
+        input_token: accessToken,
+        access_token: `${META_APP_ID}|${META_APP_SECRET}`,
+      },
+    });
+    
+    // Verificar se o token é válido e não expirou
+    const data = response.data.data;
+    if (!data || !data.is_valid) {
+      const errorMessage = data?.error?.message || 'Erro desconhecido';
+      console.error('Token de acesso inválido:', errorMessage);
+      return { isValid: false, message: `Token inválido: ${errorMessage}` };
+    }
+    
+    // Verificar se o token expirou
+    if (data.expires_at && data.expires_at * 1000 < Date.now()) {
+      console.error('Token de acesso expirado');
+      return { isValid: false, message: 'Token expirado' };
+    }
+    
+    console.log('Token de acesso válido');
+    return { isValid: true, message: 'Token válido' };
+  } catch (error) {
+    console.error('Erro ao validar token de acesso:', error.response?.data || error.message);
+    return { 
+      isValid: false, 
+      message: `Erro na validação: ${error.response?.data?.error?.message || error.message}`
     };
   }
 };

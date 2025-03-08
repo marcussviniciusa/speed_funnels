@@ -28,5 +28,6 @@ router.put('/:integrationId/disable', integrationController.disableIntegration);
 // Novas rotas para sincronização de dados
 router.post('/company/:companyId/sync', integrationController.syncCompanyData);
 router.post('/connection/:connectionId/sync', integrationController.syncConnectionData);
+router.post('/sync/ad-account', integrationController.syncMetaAdAccount);
 
 module.exports = router;
