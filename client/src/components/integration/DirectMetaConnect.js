@@ -17,7 +17,7 @@ import {
 import { Facebook as FacebookIcon } from '@mui/icons-material';
 import api from '../../services/api';
 
-const DirectMetaConnect = ({ companyId, onSuccess }) => {
+const DirectMetaConnect = ({ companyId, onSuccess, disabled = false }) => {
   const [accessToken, setAccessToken] = useState('');
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState('');
@@ -27,6 +27,11 @@ const DirectMetaConnect = ({ companyId, onSuccess }) => {
   const handleConnect = async () => {
     if (!accessToken) {
       setError('Por favor, insira um token de acesso válido');
+      return;
+    }
+
+    if (!companyId) {
+      setError('Por favor, selecione uma empresa antes de continuar');
       return;
     }
 
@@ -63,10 +68,7 @@ const DirectMetaConnect = ({ companyId, onSuccess }) => {
   };
 
   return (
-    <Paper elevation={2} sx={{ p: 3, mt: 3 }}>
-      <Typography variant="h6" gutterBottom>
-        Conectar diretamente ao Meta Ads
-      </Typography>
+    <Box sx={{ mt: 2 }}>
       <Typography variant="body2" color="text.secondary" paragraph>
         Use esta opção para conectar diretamente com o Meta Ads usando um token de acesso válido.
       </Typography>
@@ -95,12 +97,13 @@ const DirectMetaConnect = ({ companyId, onSuccess }) => {
             rows={3}
             variant="outlined"
             sx={{ mb: 2 }}
+            disabled={disabled || !companyId}
           />
           <Box sx={{ display: 'flex', gap: 2 }}>
             <Button
               variant="outlined"
               onClick={handlePasteToken}
-              disabled={loading}
+              disabled={loading || disabled || !companyId}
             >
               Usar Token Fornecido
             </Button>
@@ -108,12 +111,18 @@ const DirectMetaConnect = ({ companyId, onSuccess }) => {
               variant="contained"
               color="primary"
               onClick={handleConnect}
-              disabled={!accessToken || loading}
+              disabled={!accessToken || loading || disabled || !companyId}
               startIcon={loading ? <CircularProgress size={20} color="inherit" /> : <FacebookIcon />}
             >
               {loading ? 'Conectando...' : 'Conectar ao Meta Ads'}
             </Button>
           </Box>
+          
+          {!companyId && !disabled && (
+            <Typography variant="caption" color="error" sx={{ mt: 1, display: 'block' }}>
+              Selecione uma empresa antes de continuar
+            </Typography>
+          )}
         </Box>
       ) : connectionData && (
         <Box sx={{ mt: 2 }}>
@@ -167,7 +176,7 @@ const DirectMetaConnect = ({ companyId, onSuccess }) => {
           </Button>
         </Box>
       )}
-    </Paper>
+    </Box>
   );
 };
 

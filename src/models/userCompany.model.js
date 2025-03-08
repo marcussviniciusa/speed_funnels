@@ -44,5 +44,18 @@ module.exports = (sequelize) => {
     ],
   });
 
+  // Adicionar associações para o modelo UserCompany
+  UserCompany.associate = (models) => {
+    UserCompany.belongsTo(models.User, {
+      foreignKey: 'userId',
+      as: 'user'
+    });
+    
+    UserCompany.belongsTo(models.Company, {
+      foreignKey: 'companyId',
+      as: 'company'
+    });
+  };
+
   return UserCompany;
 };

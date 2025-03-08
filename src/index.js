@@ -13,6 +13,7 @@ const integrationRoutes = require('./routes/integration.routes');
 const scheduleRoutes = require('./routes/schedule.routes');
 const metricsRoutes = require('./routes/metrics.routes');
 const settingsRoutes = require('./routes/settings.routes');
+const adDataRoutes = require('./routes/adData.routes');
 const authCallbackRoutes = require('./routes/auth.callback.routes');
 const { initCronJobs } = require('./config/cron');
 
@@ -59,6 +60,7 @@ app.use('/api/integrations', integrationRoutes);
 app.use('/api/schedules', scheduleRoutes);
 app.use('/api/metrics', metricsRoutes);
 app.use('/api/settings', settingsRoutes);
+app.use('/api/addata', adDataRoutes); // Rotas para dados de anúncios
 app.use('/auth', authCallbackRoutes); // Rotas públicas para callbacks (sem autenticação)
 
 // Rota para servir o frontend React em qualquer outra rota
@@ -80,6 +82,9 @@ app.use((err, req, res, next) => {
   });
 });
 
+// Importar gerenciador de migrações
+const { runMigrations } = require('./migrations/migrationManager');
+
 // Inicialização do servidor
 async function startServer() {
   try {
@@ -89,14 +94,22 @@ async function startServer() {
         console.log(`Servidor rodando na porta ${PORT}`);
       });
     } else {
+      // Autenticar conexão com o banco de dados
       await sequelize.authenticate();
       console.log('Conexão com o banco de dados estabelecida com sucesso.');
       
+      // Executar migrações pendentes
+      if (process.env.RUN_MIGRATIONS !== 'false') {
+        console.log('Verificando e aplicando migrações pendentes...');
+        await runMigrations();
+      }
+      
+      // Iniciar o servidor
       app.listen(PORT, () => {
         console.log(`Servidor rodando na porta ${PORT}`);
         
         // Inicializar cron jobs
-        if (process.env.ENABLE_CRON_JOBS === 'true') {
+        if (process.env.ENABLE_CRON_JOBS !== 'false') {
           initCronJobs();
         }
       });

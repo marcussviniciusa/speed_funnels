@@ -7,7 +7,7 @@ import api from '../../services/api';
  * Botão de login com Facebook que utiliza o SDK do Facebook
  * para autenticação e obtenção de permissões de anúncios
  */
-const FacebookLoginButton = ({ onLoginSuccess, onLoginFailure, companyId = '1' }) => {
+const FacebookLoginButton = ({ onLoginSuccess, onLoginFailure, companyId, disabled = false }) => {
   const [loading, setLoading] = useState(false);
   const [isSdkLoaded, setIsSdkLoaded] = useState(false);
 
@@ -25,6 +25,13 @@ const FacebookLoginButton = ({ onLoginSuccess, onLoginFailure, companyId = '1' }
 
   // Função para iniciar o fluxo de autorização
   const handleFacebookLogin = async () => {
+    if (!companyId) {
+      if (typeof onLoginFailure === 'function') {
+        onLoginFailure('Por favor, selecione uma empresa antes de continuar');
+      }
+      return;
+    }
+    
     setLoading(true);
     
     try {
@@ -54,6 +61,13 @@ const FacebookLoginButton = ({ onLoginSuccess, onLoginFailure, companyId = '1' }
     if (!window.FB) {
       if (typeof onLoginFailure === 'function') {
         onLoginFailure('SDK do Facebook não carregado');
+      }
+      return;
+    }
+    
+    if (!companyId) {
+      if (typeof onLoginFailure === 'function') {
+        onLoginFailure('Por favor, selecione uma empresa antes de continuar');
       }
       return;
     }
@@ -111,7 +125,7 @@ const FacebookLoginButton = ({ onLoginSuccess, onLoginFailure, companyId = '1' }
         color="primary"
         startIcon={loading ? <CircularProgress size={20} color="inherit" /> : <FacebookIcon />}
         onClick={handleFacebookLogin}
-        disabled={loading}
+        disabled={loading || disabled || !companyId}
         fullWidth
         sx={{
           backgroundColor: '#1877F2',
@@ -122,6 +136,12 @@ const FacebookLoginButton = ({ onLoginSuccess, onLoginFailure, companyId = '1' }
       >
         {loading ? 'Conectando...' : 'Conectar com Facebook'}
       </Button>
+      
+      {!companyId && !disabled && (
+        <Typography variant="caption" color="error" sx={{ mt: 1, display: 'block' }}>
+          Selecione uma empresa antes de continuar
+        </Typography>
+      )}
     </Box>
   );
 };

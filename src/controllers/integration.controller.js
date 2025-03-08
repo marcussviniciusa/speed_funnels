@@ -311,20 +311,33 @@ exports.metaCallback = async (req, res, next) => {
 // Callback público para integração com Meta (sem autenticação)
 exports.metaPublicCallback = async (req, res, next) => {
   try {
+    const redirectBaseUrl = process.env.FRONTEND_URL || 'https://speedfunnels.marcussviniciusa.cloud';
     const { code, state, error, error_description } = req.query;
     
-    console.log(`Callback público do Meta recebido. Estado: ${state}`);
+    // Log detalhado dos parâmetros recebidos
+    console.log('Callback do Meta recebido com parâmetros:', {
+      code: code ? 'Presente' : 'Ausente',
+      state: state,
+      error: error,
+      error_description: error_description,
+      query: JSON.stringify(req.query)
+    });
     
     // Verificar se houve erro na autorização
     if (error) {
       console.error(`Erro na autorização do Meta: ${error} - ${error_description}`);
-      return res.redirect(`${process.env.FRONTEND_URL || 'https://speedfunnels.marcussviniciusa.cloud'}/integrations?error=${encodeURIComponent(error_description || error)}`);
+      return res.redirect(`${redirectBaseUrl}/integrations?error=${encodeURIComponent(error_description || error)}`);
     }
     
     // Verificar se o código e o estado estão presentes
-    if (!code || !state) {
-      console.error('Código ou estado ausente no callback público do Meta');
-      return res.redirect(`${process.env.FRONTEND_URL || 'https://speedfunnels.marcussviniciusa.cloud'}/integrations?error=Parâmetros%20inválidos%20no%20callback`);
+    if (!code) {
+      console.error('Código de autorização ausente no callback');
+      return res.redirect(`${redirectBaseUrl}/integrations?error=Código%20de%20autorização%20ausente`);
+    }
+    
+    if (!state) {
+      console.error('Estado ausente no callback');
+      return res.redirect(`${redirectBaseUrl}/integrations?error=Estado%20ausente`);
     }
     
     // Extrair dados do estado
@@ -333,53 +346,98 @@ exports.metaPublicCallback = async (req, res, next) => {
     
     if (stateData.length < 3) {
       console.error(`Formato inválido de estado: ${state}`);
-      return res.redirect(`${process.env.FRONTEND_URL || 'https://speedfunnels.marcussviniciusa.cloud'}/integrations?error=Formato%20de%20estado%20inválido`);
+      return res.redirect(`${redirectBaseUrl}/integrations?error=Formato%20de%20estado%20inválido`);
     }
     
     const userId = stateData[0];
     const companyId = stateData[1];
     
+    console.log(`Processando callback para usuário ${userId} e empresa ${companyId}`);
+    
     // Trocar código por token de acesso
-    const tokenData = await metaService.getAccessToken(code);
-    
-    if (!tokenData || !tokenData.accessToken) {
-      console.error('Falha ao obter token de acesso');
-      return res.redirect(`${process.env.FRONTEND_URL || 'https://speedfunnels.marcussviniciusa.cloud'}/integrations?error=Falha%20ao%20obter%20token%20de%20acesso`);
+    try {
+      const tokenData = await metaService.getAccessToken(code);
+      
+      if (!tokenData || !tokenData.accessToken) {
+        console.error('Falha ao obter token de acesso');
+        return res.redirect(`${redirectBaseUrl}/integrations?error=Falha%20ao%20obter%20token%20de%20acesso`);
+      }
+      
+      // Obter informações do usuário do Meta
+      const userInfo = await metaService.getUserInfo(tokenData.accessToken);
+      
+      // Obter contas de anúncios disponíveis
+      const adAccounts = await metaService.getAdAccounts(tokenData.accessToken);
+      
+      // Filtrar apenas contas ativas (status 1 indica conta ativa)
+      const activeAccounts = adAccounts.filter(account => account.status === 1);
+      
+      // Selecionar a primeira conta de anúncios ativa (se disponível)
+      const defaultAccount = activeAccounts && activeAccounts.length > 0 ? activeAccounts[0] : null;
+      
+      console.log(`Encontradas ${adAccounts.length} contas de anúncios, das quais ${activeAccounts.length} estão ativas`);
+      console.log('Conta padrão selecionada:', defaultAccount ? defaultAccount.name : 'Nenhuma');
+      
+      // Verificar se já existe uma conexão para esta empresa/usuário
+      const existingConnection = await ApiConnection.findOne({
+        where: {
+          userId,
+          companyId,
+          platform: 'meta'
+        }
+      });
+      
+      if (existingConnection) {
+        // Atualizar conexão existente
+        console.log(`Atualizando conexão existente ID: ${existingConnection.id}`);
+        await existingConnection.update({
+          accessToken: tokenData.accessToken,
+          refreshToken: tokenData.refreshToken || null,
+          tokenExpiresAt: tokenData.expiresIn ? new Date(Date.now() + tokenData.expiresIn * 1000) : null,
+          platformUserId: userInfo.id,
+          platformUserName: userInfo.name,
+          platformUserEmail: userInfo.email,
+          metadata: JSON.stringify({
+            adAccounts: adAccounts,
+            userInfo: userInfo
+          }),
+          isActive: true,
+          accountId: defaultAccount ? defaultAccount.id : existingConnection.accountId
+        });
+      } else {
+        // Criar nova conexão
+        console.log('Criando nova conexão');
+        await ApiConnection.create({
+          platform: 'meta',
+          accessToken: tokenData.accessToken,
+          refreshToken: tokenData.refreshToken || null,
+          tokenExpiresAt: tokenData.expiresIn ? new Date(Date.now() + tokenData.expiresIn * 1000) : null,
+          platformUserId: userInfo.id,
+          platformUserName: userInfo.name,
+          platformUserEmail: userInfo.email || null,
+          metadata: JSON.stringify({
+            adAccounts: adAccounts,
+            userInfo: userInfo
+          }),
+          companyId: companyId,
+          userId: userId,
+          isActive: true,
+          accountId: defaultAccount ? defaultAccount.id : null
+        });
+      }
+      
+      console.log('Integração com Meta concluída com sucesso');
+      
+      // Redirecionar para a página de integrações com sucesso
+      return res.redirect(`${redirectBaseUrl}/integrations?success=Integração%20com%20Meta%20Ads%20realizada%20com%20sucesso`);
+    } catch (tokenError) {
+      console.error('Erro ao processar token ou obter dados:', tokenError);
+      return res.redirect(`${redirectBaseUrl}/integrations?error=${encodeURIComponent(tokenError.message || 'Erro ao processar o token')}`);
     }
-    
-    // Obter informações do usuário do Meta
-    const userInfo = await metaService.getUserInfo(tokenData.accessToken);
-    
-    // Obter contas de anúncios disponíveis
-    const adAccounts = await metaService.getAdAccounts(tokenData.accessToken);
-    
-    // Selecionar a primeira conta de anúncios ativa (se disponível)
-    const defaultAccount = adAccounts && adAccounts.length > 0 ? adAccounts[0] : null;
-    
-    // Salvar a conexão no banco de dados
-    const apiConnection = await ApiConnection.create({
-      platform: 'meta',
-      accessToken: tokenData.accessToken,
-      refreshToken: tokenData.refreshToken || null,
-      tokenExpiresAt: tokenData.expiresIn ? new Date(Date.now() + tokenData.expiresIn * 1000) : null,
-      platformUserId: userInfo.id,
-      platformUserName: userInfo.name,
-      platformUserEmail: userInfo.email,
-      metadata: JSON.stringify({
-        adAccounts: adAccounts,
-        userInfo: userInfo
-      }),
-      companyId: companyId,
-      userId: userId,
-      isActive: true,
-      accountId: defaultAccount ? defaultAccount.id : null
-    });
-    
-    // Redirecionar para a página de integrações com sucesso
-    return res.redirect(`${process.env.FRONTEND_URL || 'https://speedfunnels.marcussviniciusa.cloud'}/integrations?success=Integração%20com%20Meta%20Ads%20realizada%20com%20sucesso`);
   } catch (error) {
     console.error('Erro no callback público do Meta:', error);
-    return res.redirect(`${process.env.FRONTEND_URL || 'https://speedfunnels.marcussviniciusa.cloud'}/integrations?error=${encodeURIComponent(error.message || 'Erro ao processar o callback')}`);
+    const redirectBaseUrl = process.env.FRONTEND_URL || 'https://speedfunnels.marcussviniciusa.cloud';
+    return res.redirect(`${redirectBaseUrl}/integrations?error=${encodeURIComponent(error.message || 'Erro ao processar o callback')}`);
   }
 };
 
@@ -467,8 +525,9 @@ exports.googleCallback = async (req, res, next) => {
       console.log('Nova conexão criada');
     }
     
-    // Redirecionar para página de sucesso
-    console.log('Redirecionando para página de sucesso');
+    console.log(`Integração com Google concluída com sucesso para conta ${userInfo.id}`);
+    
+    // Redirecionar para a página de integrações com sucesso
     res.redirect(`/company/${companyId}/integrations?success=true&platform=google_analytics`);
     
   } catch (error) {
@@ -676,11 +735,14 @@ exports.connectMetaWithToken = async (req, res, next) => {
     // Validar o token
     try {
       console.log('Validando token de acesso...');
-      const isValid = await metaService.validateToken(accessToken);
+      const tokenValidation = await metaService.validateToken(accessToken);
       
-      if (!isValid) {
+      if (!tokenValidation || !tokenValidation.valid) {
+        console.error('Token inválido ou expirado');
         throw createError(400, 'Token de acesso inválido ou expirado');
       }
+      
+      console.log('Token validado com sucesso');
       
       // Obter informações do usuário
       console.log('Solicitando informações do usuário...');
@@ -740,6 +802,97 @@ exports.connectMetaWithToken = async (req, res, next) => {
     }
   } catch (error) {
     console.error('Erro no connectMetaWithToken:', error);
+    next(error);
+  }
+};
+
+// Sincronizar dados de uma empresa específica
+exports.syncCompanyData = async (req, res, next) => {
+  try {
+    const { companyId } = req.params;
+    const userId = req.user.id;
+    
+    console.log(`Iniciando sincronização de dados para empresa ${companyId} solicitada pelo usuário ${userId}`);
+    
+    // Verificar se a empresa existe e se o usuário tem acesso
+    const company = await Company.findByPk(companyId);
+    
+    if (!company) {
+      throw createError(404, 'Empresa não encontrada');
+    }
+    
+    // Verificar se o usuário tem acesso à empresa
+    const userCompany = await UserCompany.findOne({
+      where: { userId, companyId }
+    });
+    
+    if (!userCompany) {
+      throw createError(403, 'Você não tem permissão para sincronizar dados desta empresa');
+    }
+    
+    // Iniciar processo de sincronização
+    console.log(`Iniciando sincronização de dados do Meta para empresa ${companyId}`);
+    const syncResult = await metaService.syncCompanyConnections(companyId);
+    
+    if (syncResult.success) {
+      res.json({
+        success: true,
+        message: `Sincronização de dados concluída para empresa ${company.name}`,
+        data: {
+          companyId: companyId,
+          companyName: company.name,
+          totalProcessed: syncResult.totalProcessed,
+          results: syncResult.results
+        }
+      });
+    } else {
+      throw createError(500, `Falha na sincronização: ${syncResult.error}`);
+    }
+  } catch (error) {
+    console.error('Erro ao sincronizar dados da empresa:', error);
+    next(error);
+  }
+};
+
+// Sincronizar dados de uma conexão específica
+exports.syncConnectionData = async (req, res, next) => {
+  try {
+    const { connectionId } = req.params;
+    const userId = req.user.id;
+    
+    console.log(`Iniciando sincronização de dados para conexão ${connectionId} solicitada pelo usuário ${userId}`);
+    
+    // Buscar a conexão
+    const connection = await ApiConnection.findByPk(connectionId);
+    
+    if (!connection) {
+      throw createError(404, 'Conexão não encontrada');
+    }
+    
+    // Verificar se o usuário tem acesso à empresa da conexão
+    const userCompany = await UserCompany.findOne({
+      where: { userId, companyId: connection.companyId }
+    });
+    
+    if (!userCompany) {
+      throw createError(403, 'Você não tem permissão para sincronizar dados desta conexão');
+    }
+    
+    // Iniciar processo de sincronização
+    console.log(`Iniciando sincronização de dados para conexão ${connectionId}`);
+    const syncResult = await metaService.syncConnectionData(connectionId);
+    
+    if (syncResult.success) {
+      res.json({
+        success: true,
+        message: `Sincronização de dados concluída para conexão ${connectionId}`,
+        data: syncResult
+      });
+    } else {
+      throw createError(500, `Falha na sincronização: ${syncResult.error}`);
+    }
+  } catch (error) {
+    console.error('Erro ao sincronizar dados da conexão:', error);
     next(error);
   }
 };

@@ -5,86 +5,70 @@ import api from './api';
  */
 const integrationService = {
   /**
-   * Obtém todas as integrações da empresa
-   * @returns {Promise} Promise com os dados das integrações
+   * Busca todas as integrações ativas do usuário
    */
-  getIntegrations: () => {
-    return api.get('/api/integrations');
+  getIntegrations: async () => {
+    return await api.get('/api/integrations');
   },
 
   /**
-   * Inicia o processo de integração com o Meta Ads
-   * @returns {Promise} Promise com a URL de autorização
+   * Busca métricas do Facebook para um determinado período
    */
-  startMetaIntegration: () => {
-    return api.get('/api/integrations/meta/auth/1'); // Usando ID da empresa 1 como padrão
+  getFacebookMetrics: async (dateRange) => {
+    return await api.get('/api/metrics/facebook', { params: dateRange });
   },
 
   /**
-   * Conecta diretamente com o Meta Ads usando um token de acesso
-   * @param {string} accessToken - Token de acesso do Meta Ads
-   * @param {string} companyId - ID da empresa (opcional, padrão é 1)
-   * @returns {Promise} Promise com o resultado da operação
+   * Inicia o processo de integração com o Meta Ads para uma empresa específica
+   * @param {string} companyId - ID da empresa
    */
-  connectMetaWithToken: (accessToken, companyId = '1') => {
-    return api.post(`/api/integrations/meta/connect/${companyId}`, { accessToken });
+  startMetaIntegrationForCompany: async (companyId) => {
+    return await api.get(`/api/integrations/meta/auth/${companyId}`);
   },
 
   /**
-   * Inicia o processo de integração com o Google Analytics
-   * @returns {Promise} Promise com a URL de autorização
+   * Sincroniza dados do Meta para uma empresa específica
+   * @param {string} companyId - ID da empresa
    */
-  startGoogleIntegration: () => {
-    return api.get('/api/integrations/google/auth/1'); // Usando ID da empresa 1 como padrão
+  syncCompanyMetaData: async (companyId) => {
+    return await api.post(`/api/integrations/company/${companyId}/sync`);
   },
 
   /**
-   * Desativa uma integração
-   * @param {string} integrationId - ID da integração a ser desativada
-   * @returns {Promise} Promise com o resultado da operação
+   * Sincroniza dados para uma conexão específica
+   * @param {string} connectionId - ID da conexão
    */
-  disableIntegration: (integrationId) => {
-    return api.put(`/api/integrations/${integrationId}/disable`);
+  syncConnectionData: async (connectionId) => {
+    return await api.post(`/api/integrations/connection/${connectionId}/sync`);
   },
 
   /**
-   * Obtém métricas do Meta Ads
+   * Busca a lista de empresas disponíveis para o usuário
+   */
+  getCompanies: async () => {
+    return await api.get('/api/companies');
+  },
+
+  /**
+   * Busca as contas de anúncios do Meta para uma conexão específica
+   * @param {string} connectionId - ID da conexão
+   */
+  getMetaAdAccounts: async (connectionId) => {
+    return await api.get('/api/integrations/meta/ad-accounts', {
+      params: { connectionId }
+    });
+  },
+
+  /**
+   * Sincroniza uma conta de anúncios do Meta específica
+   * @param {string} companyId - ID da empresa
    * @param {string} adAccountId - ID da conta de anúncios
-   * @param {Object} dateRange - Período de datas para as métricas
-   * @returns {Promise} Promise com os dados das métricas
    */
-  getMetaMetrics: (adAccountId, dateRange) => {
-    return api.get(`/api/metrics/meta/${adAccountId}`, {
-      params: dateRange
+  syncMetaAdAccount: async (companyId, adAccountId) => {
+    return await api.post('/api/integrations/sync/ad-account', {
+      companyId,
+      adAccountId
     });
-  },
-
-  /**
-   * Obtém métricas do Google Analytics
-   * @param {string} propertyId - ID da propriedade do GA4
-   * @param {Object} dateRange - Período de datas para as métricas
-   * @returns {Promise} Promise com os dados das métricas
-   */
-  getGoogleMetrics: (propertyId, dateRange) => {
-    return api.get(`/api/metrics/google/${propertyId}`, {
-      params: dateRange
-    });
-  },
-
-  /**
-   * Obtém contas de anúncios disponíveis no Meta Ads
-   * @returns {Promise} Promise com a lista de contas de anúncios
-   */
-  getMetaAdAccounts: () => {
-    return api.get('/api/metrics/meta/accounts');
-  },
-
-  /**
-   * Obtém propriedades disponíveis no Google Analytics
-   * @returns {Promise} Promise com a lista de propriedades
-   */
-  getGoogleProperties: () => {
-    return api.get('/api/metrics/google/properties');
   }
 };
 

@@ -5,6 +5,7 @@ const createError = require('http-errors');
 exports.getUserCompanies = async (req, res, next) => {
   try {
     const userId = req.user.id;
+    console.log(`Buscando empresas para o usuário ID: ${userId}`);
     
     // Buscar todas as empresas do usuário com suas permissões
     const userCompanies = await UserCompany.findAll({
@@ -18,16 +19,29 @@ exports.getUserCompanies = async (req, res, next) => {
       ]
     });
     
+    console.log(`Encontradas ${userCompanies.length} relações de usuário-empresa`);
+    console.log('Detalhes das relações:', JSON.stringify(userCompanies, null, 2));
+    
     // Transformar os dados para o formato desejado
-    const companies = userCompanies.map(uc => ({
-      id: uc.company.id,
-      name: uc.company.name,
-      logoUrl: uc.company.logoUrl,
-      primaryColor: uc.company.primaryColor,
-      secondaryColor: uc.company.secondaryColor,
-      isActive: uc.company.isActive,
-      role: uc.role
-    }));
+    const companies = userCompanies.map(uc => {
+      if (!uc.company) {
+        console.log(`AVISO: Empresa não encontrada para a relação UserCompany ID: ${uc.id}`);
+        return null;
+      }
+      
+      return {
+        id: uc.company.id,
+        name: uc.company.name,
+        logoUrl: uc.company.logoUrl,
+        primaryColor: uc.company.primaryColor,
+        secondaryColor: uc.company.secondaryColor,
+        isActive: uc.company.isActive,
+        role: uc.role
+      };
+    }).filter(Boolean); // Remover entradas nulas
+    
+    console.log(`Retornando ${companies.length} empresas formatadas`);
+    console.log('Empresas formatadas:', JSON.stringify(companies, null, 2));
     
     res.json({
       success: true,

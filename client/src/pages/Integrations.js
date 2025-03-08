@@ -16,6 +16,7 @@ import { Link as RouterLink } from 'react-router-dom';
 import IntegrationSettings from '../components/settings/IntegrationSettings';
 import FacebookIntegration from '../components/integration/FacebookIntegration';
 import FacebookSDK from '../components/integration/FacebookSDK';
+import CompanySyncSelector from '../components/integration/CompanySyncSelector';
 import integrationService from '../services/integrationService';
 
 /**
@@ -164,6 +165,11 @@ const Integrations = () => {
     fetchIntegrations();
   };
 
+  // Manipular sucesso na sincronização de dados
+  const handleSyncSuccess = (data) => {
+    setSuccess('Sincronização de dados iniciada com sucesso. Os dados serão atualizados em segundo plano.');
+  };
+
   return (
     <Container maxWidth="lg">
       <Box sx={{ py: 4 }}>
@@ -184,6 +190,7 @@ const Integrations = () => {
               <Tabs value={activeTab} onChange={handleTabChange} aria-label="integration tabs">
                 <Tab label="Integrações OAuth" />
                 <Tab label="Conexão Direta" />
+                <Tab label="Sincronização de Dados" />
               </Tabs>
             </Box>
 
@@ -196,60 +203,36 @@ const Integrations = () => {
                   loading={saving}
                 />
               </Paper>
-            ) : (
+            ) : activeTab === 1 ? (
               <Box>
                 <FacebookIntegration 
-                  companyId="1" 
-                  onIntegrationSuccess={handleDirectMetaSuccess}
+                  onIntegrationSuccess={handleDirectMetaSuccess} 
                 />
-                <Box sx={{ my: 4 }}>
-                  <Divider />
-                </Box>
-                <IntegrationSettings 
-                  integrations={integrations}
-                  onSave={handleSaveIntegration}
-                  onDelete={handleDeleteIntegration}
-                  loading={saving}
+              </Box>
+            ) : (
+              <Box>
+                <CompanySyncSelector 
+                  onSyncSuccess={handleSyncSuccess}
                 />
               </Box>
             )}
           </>
         )}
 
-        <Box sx={{ mt: 4, display: 'flex', justifyContent: 'flex-end' }}>
-          <Button 
-            component={RouterLink} 
-            to="/dashboard" 
-            variant="outlined" 
-            sx={{ mr: 2 }}
+        <Snackbar 
+          open={error !== null || success !== null} 
+          autoHideDuration={6000} 
+          onClose={handleCloseAlert}
+        >
+          <Alert 
+            onClose={handleCloseAlert} 
+            severity={error !== null ? 'error' : 'success'} 
+            sx={{ width: '100%' }}
           >
-            Voltar para Dashboard
-          </Button>
-        </Box>
+            {error || success}
+          </Alert>
+        </Snackbar>
       </Box>
-
-      {/* Alertas */}
-      <Snackbar 
-        open={!!error} 
-        autoHideDuration={6000} 
-        onClose={handleCloseAlert}
-        anchorOrigin={{ vertical: 'bottom', horizontal: 'center' }}
-      >
-        <Alert onClose={handleCloseAlert} severity="error" sx={{ width: '100%' }}>
-          {error}
-        </Alert>
-      </Snackbar>
-
-      <Snackbar 
-        open={!!success} 
-        autoHideDuration={6000} 
-        onClose={handleCloseAlert}
-        anchorOrigin={{ vertical: 'bottom', horizontal: 'center' }}
-      >
-        <Alert onClose={handleCloseAlert} severity="success" sx={{ width: '100%' }}>
-          {success}
-        </Alert>
-      </Snackbar>
     </Container>
   );
 };
