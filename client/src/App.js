@@ -16,6 +16,12 @@ import Profile from './pages/Profile';
 import Billing from './pages/Billing';
 import Integrations from './pages/Integrations';
 
+// Superadmin Pages
+import SuperadminDashboard from './pages/superadmin/Dashboard';
+import SuperadminCompanies from './pages/superadmin/Companies';
+import SuperadminUsers from './pages/superadmin/Users';
+import SuperadminSettings from './pages/superadmin/Settings';
+
 const ProtectedRoute = ({ children }) => {
   const { isAuthenticated, isLoading } = useAuth();
 
@@ -25,6 +31,24 @@ const ProtectedRoute = ({ children }) => {
 
   if (!isAuthenticated) {
     return <Navigate to="/login" />;
+  }
+
+  return children;
+};
+
+const SuperadminRoute = ({ children }) => {
+  const { isAuthenticated, isLoading, user } = useAuth();
+
+  if (isLoading) {
+    return <div>Carregando...</div>;
+  }
+
+  if (!isAuthenticated) {
+    return <Navigate to="/login" />;
+  }
+
+  if (user?.role !== 'superadmin') {
+    return <Navigate to="/dashboard" />;
   }
 
   return children;
@@ -68,6 +92,21 @@ function App() {
           {/* Rota de faturamento temporariamente desativada
           <Route path="/billing" element={<Billing />} />
           */}
+        </Route>
+
+        {/* Superadmin Routes */}
+        <Route element={
+          <SuperadminRoute>
+            <div style={{ display: 'flex' }}>
+              {/* O SuperadminSidebar já está incluído dentro de cada componente de página */}
+              <div style={{ flexGrow: 1 }}></div>
+            </div>
+          </SuperadminRoute>
+        }>
+          <Route path="/superadmin/dashboard" element={<SuperadminDashboard />} />
+          <Route path="/superadmin/companies" element={<SuperadminCompanies />} />
+          <Route path="/superadmin/users" element={<SuperadminUsers />} />
+          <Route path="/superadmin/settings" element={<SuperadminSettings />} />
         </Route>
 
         {/* Redirect to dashboard or login based on auth status */}

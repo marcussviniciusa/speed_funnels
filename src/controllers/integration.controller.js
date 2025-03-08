@@ -983,7 +983,11 @@ exports.syncMetaAdAccount = async (req, res, next) => {
     );
     
     // Sincronizar dados
-    const syncResult = await metaService.syncMetaData(connection.id);
+    const syncResult = await metaService.syncAdAccountData({
+      id: connection.id,
+      accessToken: connection.access_token || connection.accessToken,
+      accountId: adAccountId
+    });
     
     if (!syncResult.success) {
       return res.status(500).json({

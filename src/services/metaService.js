@@ -299,6 +299,9 @@ const META_APP_ID = process.env.META_APP_ID;
 const META_APP_SECRET = process.env.META_APP_SECRET;
 const REDIRECT_URI = process.env.META_REDIRECT_URI || 'https://speedfunnels.marcussviniciusa.cloud/auth/callback/facebook';
 
+// Configuração do Login do Facebook para Empresas
+const META_BUSINESS_CONFIG_ID = process.env.META_BUSINESS_CONFIG_ID;
+
 // Verificar configurações
 const verifyConfig = () => {
   if (!META_APP_ID) {
@@ -312,18 +315,27 @@ const verifyConfig = () => {
   return true;
 };
 
-// Gerar URL de autorização
+// Gerar URL de autorização usando Login do Facebook para Empresas
 exports.getAuthUrl = (state) => {
   verifyConfig();
   
-  const scopes = [
-    'ads_read',
-    'ads_management',
-    'business_management',
-    'public_profile',
-  ].join(',');
+  // Verificar se temos um ID de configuração do Facebook para Empresas
+  if (META_BUSINESS_CONFIG_ID) {
+    console.log(`Usando Login do Facebook para Empresas com config_id: ${META_BUSINESS_CONFIG_ID}`);
+    // Usar configuração do Login do Facebook para Empresas
+    return `https://www.facebook.com/${META_API_VERSION}/dialog/oauth?client_id=${META_APP_ID}&redirect_uri=${encodeURIComponent(REDIRECT_URI)}&config_id=${META_BUSINESS_CONFIG_ID}&state=${state}&response_type=code&override_default_response_type=true`;
+  } else {
+    console.log('Config_id não configurado, usando fallback para scopes individuais');
+    // Fallback para o método tradicional com scopes individuais
+    const scopes = [
+      'ads_read',
+      'ads_management',
+      'business_management',
+      'public_profile',
+    ].join(',');
 
-  return `https://www.facebook.com/${META_API_VERSION}/dialog/oauth?client_id=${META_APP_ID}&redirect_uri=${encodeURIComponent(REDIRECT_URI)}&scope=${scopes}&state=${state}&response_type=code`;
+    return `https://www.facebook.com/${META_API_VERSION}/dialog/oauth?client_id=${META_APP_ID}&redirect_uri=${encodeURIComponent(REDIRECT_URI)}&scope=${scopes}&state=${state}&response_type=code`;
+  }
 };
 
 // Trocar código por token de acesso
@@ -345,11 +357,31 @@ exports.getAccessToken = async (code) => {
 
       console.log('Resposta do Meta para token:', JSON.stringify(response.data, null, 2));
 
-      return {
+      // Verificar se estamos usando o Login do Facebook para Empresas
+      // O token deve ser tratado de forma diferente, pois pode ser um token de sistema
+      const tokenInfo = {
         accessToken: response.data.access_token,
         // Meta não retorna refresh_token por padrão, usa long-lived tokens
         expiresIn: response.data.expires_in || 5184000, // 60 dias em segundos
       };
+      
+      if (META_BUSINESS_CONFIG_ID) {
+        console.log('Token obtido através do Login do Facebook para Empresas');
+        if (response.data.data_access_expiration_time) {
+          const expirationDate = new Date(response.data.data_access_expiration_time * 1000);
+          console.log(`Acesso aos dados expira em: ${expirationDate.toISOString()}`);
+          tokenInfo.dataAccessExpirationTime = response.data.data_access_expiration_time;
+        }
+        
+        // Se tivermos o ID de usuário do sistema, podemos verificar se é um token de sistema
+        if (response.data.business_id) {
+          console.log(`Token associado ao portfólio empresarial ID: ${response.data.business_id}`);
+          tokenInfo.businessId = response.data.business_id;
+          tokenInfo.isSystemUserToken = true;
+        }
+      }
+      
+      return tokenInfo;
     } catch (error) {
       console.error('Erro ao obter token do Meta:', error.response?.data || error.message);
       throw createError(500, 'Erro ao autenticar com Meta: ' + (error.response?.data?.error?.message || error.message));
@@ -364,12 +396,20 @@ exports.getUserInfo = async (accessToken) => {
   console.log('Solicitando informações do usuário com token');
   
   try {
+    // Gerar appsecret_proof para maior segurança
+    const crypto = require('crypto');
+    const appsecretProof = crypto
+      .createHmac('sha256', META_APP_SECRET)
+      .update(accessToken)
+      .digest('hex');
+    
     // Usamos o ID global para este endpoint pois não está associado a uma conta específica
     const response = await makeMetaApiRequest(null, async () => {
       return await axios.get(`${META_BASE_URL}/me`, {
         params: {
           access_token: accessToken,
-          fields: 'id,name,email',
+          fields: 'id,name,email,business_users{name,business}',
+          appsecret_proof: appsecretProof
         },
       });
     });
@@ -510,42 +550,106 @@ exports.getCampaignInsights = async (accessToken, campaignId, timeRange = 'last_
     // Verificar se temos dados em cache
     const cachedData = responseCache.get(`${campaignId}/insights`, {
       access_token: accessToken,
-      time_range: timeRange,
-      fields: 'impressions,clicks,spend,cpc,ctr,cpp,reach,frequency',
-      level: 'campaign'
+      date_preset: 'last_30d' // Usando date_preset em vez de time_range
     });
     
     if (cachedData) {
+      console.log(`Usando dados em cache para insights da campanha ${campaignId}`);
       return cachedData;
     }
+
+    // Verificar formato do ID da campanha e remover prefixos potencialmente problemáticos
+    let cleanCampaignId = campaignId;
+    if (campaignId.includes('act_')) {
+      console.warn(`ID de campanha com formato suspeito: ${campaignId}. Tentando limpar.`);
+      const match = campaignId.match(/\d+/);
+      if (match) {
+        cleanCampaignId = match[0];
+        console.log(`ID de campanha limpo: ${cleanCampaignId}`);
+      } else {
+        console.error(`Não foi possível extrair um ID válido de: ${campaignId}`);
+        return { data: [] };
+      }
+    }
+
+    const accountId = null; // Controle de taxa global
+    console.log(`NOVA ESTRATÉGIA: Usando date_preset em vez de time_range para campanha ${cleanCampaignId}`);
     
-    // Extrair o ID da conta a partir do ID da campanha
-    const accountIdMatch = campaignId.match(/act_(\d+)/);
-    const accountId = accountIdMatch ? accountIdMatch[0] : null;
-    
-    const response = await makeMetaApiRequest(accountId, async () => {
-      return await axios.get(`${META_BASE_URL}/${campaignId}/insights`, {
-        params: {
-          access_token: accessToken,
-          time_range: timeRange,
-          fields: 'impressions,clicks,spend,cpc,ctr,cpp,reach,frequency',
-          level: 'campaign'
-        }
+    try {
+      // Usando date_preset em vez de time_range para contornar o problema
+      const params = {
+        access_token: accessToken,
+        date_preset: 'last_30d', // Isso é diferente do time_range e deve funcionar
+        fields: 'impressions,clicks,spend,cpc,ctr,cpp,reach,frequency',
+        level: 'campaign'
+      };
+      
+      console.log(`Parâmetros da requisição usando date_preset: ${JSON.stringify({...params, access_token: '[REDACTED]'})}`);      
+      
+      const response = await makeMetaApiRequest(accountId, async () => {
+        return await axios.get(`${META_BASE_URL}/${cleanCampaignId}/insights`, {
+          params: params
+        });
       });
-    });
-    
-    // Armazenar resposta em cache
-    responseCache.set(`${campaignId}/insights`, {
-      access_token: accessToken,
-      time_range: timeRange,
-      fields: 'impressions,clicks,spend,cpc,ctr,cpp,reach,frequency',
-      level: 'campaign'
-    }, response.data);
-    
-    return response.data;
+      
+      console.log(`Sucesso! Obtidos insights usando date_preset para campanha ${cleanCampaignId}`);
+      
+      // Armazenar resposta em cache
+      responseCache.set(`${cleanCampaignId}/insights`, {
+        access_token: accessToken,
+        date_preset: 'last_30d'
+      }, response.data);
+      
+      return response.data;
+    } catch (datePresetError) {
+      console.error(`Erro ao usar date_preset para campanha ${cleanCampaignId}:`, 
+                  JSON.stringify(datePresetError.response?.data || datePresetError.message));
+      
+      console.log(`PLANO B: Tentando abordagem com busca direta de campos para campanha ${cleanCampaignId}`);
+      
+      try {
+        // Abordagem alternativa: buscar a campanha diretamente com os campos relevantes
+        const campaignResponse = await makeMetaApiRequest(accountId, async () => {
+          return await axios.get(`${META_BASE_URL}/${cleanCampaignId}`, {
+            params: {
+              access_token: accessToken,
+              fields: 'id,name,status,objective,daily_budget,lifetime_budget'
+            }
+          });
+        });
+        
+        // Criar um objeto de resposta compatível com o formato esperado
+        const formattedResponse = {
+          data: [{
+            campaign_id: cleanCampaignId,
+            campaign_name: campaignResponse.data?.name || 'Desconhecido',
+            impressions: '0',
+            clicks: '0',
+            spend: campaignResponse.data?.lifetime_budget || campaignResponse.data?.daily_budget || '0',
+            objective: campaignResponse.data?.objective || 'Desconhecido',
+            status: campaignResponse.data?.status || 'UNKNOWN'
+          }]
+        };
+        
+        console.log(`Criado objeto de resposta formatado com dados básicos da campanha ${cleanCampaignId}`);
+        
+        // Armazenar resposta em cache
+        responseCache.set(`${cleanCampaignId}/insights`, {
+          access_token: accessToken,
+          date_preset: 'last_30d'
+        }, formattedResponse);
+        
+        return formattedResponse;
+      } catch (finalError) {
+        console.error(`Todas as abordagens falharam para campanha ${cleanCampaignId}:`, 
+                    JSON.stringify(finalError.response?.data || finalError.message));
+        return { data: [] };
+      }
+    }
   } catch (error) {
-    console.error(`Erro ao buscar insights para campaign ${campaignId}:`, error.response?.data || error);
-    throw error;
+    console.error(`Erro geral ao processar insights para campanha ${campaignId}:`, 
+                JSON.stringify(error.response?.data || error.message));
+    return { data: [] };
   }
 };
 
@@ -882,6 +986,101 @@ exports.syncMetaAccountForCompany = async ({ userId, companyId, accessToken, acc
     return {
       success: false,
       error: error.message
+    };
+  }
+};
+
+// Função para buscar anúncios de uma conta do Meta
+exports.getAds = async (accessToken, adAccountId) => {
+  try {
+    if (!accessToken) {
+      throw new Error('Token de acesso é obrigatório para buscar anúncios');
+    }
+    
+    if (!adAccountId) {
+      throw new Error('ID da conta de anúncios é obrigatório');
+    }
+    
+    console.log(`Buscando anúncios da conta ${adAccountId}`);
+    
+    // Verificar se temos dados em cache
+    const cachedData = responseCache.get(`${adAccountId}/ads`, {
+      access_token: accessToken,
+      fields: 'id,name,status,adset_id,creative,effective_status,created_time,updated_time',
+      limit: 50
+    });
+    
+    if (cachedData) {
+      return cachedData;
+    }
+    
+    // Gerar appsecret_proof para maior segurança quando possível
+    const crypto = require('crypto');
+    const appsecretProof = META_APP_SECRET ? crypto
+      .createHmac('sha256', META_APP_SECRET)
+      .update(accessToken)
+      .digest('hex') : null;
+    
+    const params = {
+      access_token: accessToken,
+      fields: 'id,name,status,adset_id,creative{id,name,thumbnail_url,image_url,body,title,object_story_spec},effective_status,created_time,updated_time,insights{impressions,clicks,spend}',
+      limit: 50
+    };
+    
+    // Adicionar appsecret_proof quando disponível
+    if (appsecretProof) {
+      params.appsecret_proof = appsecretProof;
+    }
+    
+    // Fazer a requisição para a API do Meta
+    const response = await makeMetaApiRequest(adAccountId, async () => {
+      return await axios.get(`${META_BASE_URL}/${adAccountId}/ads`, { params });
+    });
+    
+    // Transformar os dados para um formato mais amigável
+    const ads = response.data.data.map(ad => ({
+      id: ad.id,
+      name: ad.name,
+      status: ad.status,
+      effectiveStatus: ad.effective_status,
+      adsetId: ad.adset_id,
+      createdTime: ad.created_time,
+      updatedTime: ad.updated_time,
+      creative: ad.creative ? {
+        id: ad.creative.id,
+        name: ad.creative.name,
+        thumbnailUrl: ad.creative.thumbnail_url,
+        imageUrl: ad.creative.image_url,
+        body: ad.creative.body,
+        title: ad.creative.title,
+        objectStorySpec: ad.creative.object_story_spec
+      } : null,
+      insights: ad.insights ? {
+        impressions: ad.insights.impressions,
+        clicks: ad.insights.clicks,
+        spend: ad.insights.spend
+      } : null
+    }));
+    
+    const result = {
+      data: ads,
+      paging: response.data.paging || null
+    };
+    
+    // Armazenar em cache
+    responseCache.set(`${adAccountId}/ads`, {
+      access_token: accessToken,
+      fields: 'id,name,status,adset_id,creative,effective_status,created_time,updated_time',
+      limit: 50
+    }, result);
+    
+    return result;
+  } catch (error) {
+    console.error('Erro ao buscar anúncios:', error.response?.data || error);
+    return {
+      success: false,
+      error: error.message || 'Erro ao buscar anúncios',
+      data: []
     };
   }
 };

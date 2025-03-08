@@ -5,6 +5,7 @@ import CssBaseline from '@mui/material/CssBaseline';
 import { LocalizationProvider } from '@mui/x-date-pickers';
 import { AdapterDateFns } from '@mui/x-date-pickers/AdapterDateFns';
 import { ptBR } from 'date-fns/locale';
+import { SnackbarProvider } from 'notistack';
 import App from './App';
 import { AuthProvider } from './contexts/AuthContext';
 import './index.css';
@@ -79,9 +80,11 @@ root.render(
     <ThemeProvider theme={theme}>
       <CssBaseline />
       <LocalizationProvider dateAdapter={AdapterDateFns} adapterLocale={ptBR}>
-        <AuthProvider>
-          <App />
-        </AuthProvider>
+        <SnackbarProvider maxSnack={3} autoHideDuration={3000}>
+          <AuthProvider>
+            <App />
+          </AuthProvider>
+        </SnackbarProvider>
       </LocalizationProvider>
     </ThemeProvider>
   </React.StrictMode>

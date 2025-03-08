@@ -15,6 +15,7 @@ const metricsRoutes = require('./routes/metrics.routes');
 const settingsRoutes = require('./routes/settings.routes');
 const adDataRoutes = require('./routes/adData.routes');
 const authCallbackRoutes = require('./routes/auth.callback.routes');
+const superadminRoutes = require('./routes/superadmin.routes');
 const { initCronJobs } = require('./config/cron');
 
 dotenv.config();
@@ -61,6 +62,7 @@ app.use('/api/schedules', scheduleRoutes);
 app.use('/api/metrics', metricsRoutes);
 app.use('/api/settings', settingsRoutes);
 app.use('/api/addata', adDataRoutes); // Rotas para dados de anúncios
+app.use('/api/superadmin', superadminRoutes); // Rotas para funções de superadmin
 app.use('/auth', authCallbackRoutes); // Rotas públicas para callbacks (sem autenticação)
 
 // Rota para servir o frontend React em qualquer outra rota

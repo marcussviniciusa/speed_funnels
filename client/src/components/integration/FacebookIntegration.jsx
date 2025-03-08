@@ -17,9 +17,14 @@ import {
   InputLabel,
   Select,
   MenuItem,
-  CircularProgress
+  CircularProgress,
+  Card,
+  CardContent,
+  CardMedia,
+  Grid,
+  Chip
 } from '@mui/material';
-import { Facebook as FacebookIcon, Code as CodeIcon } from '@mui/icons-material';
+import { Facebook as FacebookIcon, Code as CodeIcon, CheckCircle as CheckCircleIcon, Cancel as CancelIcon } from '@mui/icons-material';
 import DirectMetaConnect from './DirectMetaConnect';
 import FacebookLoginButton from './FacebookLoginButton';
 import CompanySyncSelector from './CompanySyncSelector';
@@ -39,6 +44,8 @@ const FacebookIntegration = ({ onIntegrationSuccess }) => {
   const [loadingCompanies, setLoadingCompanies] = useState(true);
   const [adAccounts, setAdAccounts] = useState([]);
   const [loadingAdAccounts, setLoadingAdAccounts] = useState(false);
+  const [ads, setAds] = useState([]);
+  const [loadingAds, setLoadingAds] = useState(false);
 
   // Carregar lista de empresas ao montar o componente
   useEffect(() => {
@@ -111,6 +118,11 @@ const FacebookIntegration = ({ onIntegrationSuccess }) => {
             accountName: response.data.data.activeConnection.accountName
           });
           setSuccess(true);
+          
+          // Se tiver uma conta selecionada, buscar anúncios automaticamente
+          if (response.data.data.activeConnection.accountId) {
+            fetchAds(response.data.data.activeConnection.accountId);
+          }
         }
       } else {
         console.log('Resposta recebida sem contas de anúncios:', response.data);
@@ -182,6 +194,35 @@ const FacebookIntegration = ({ onIntegrationSuccess }) => {
       }));
       
       console.log(`Conta de anúncios selecionada: ${selectedAccount.name} (${newAccountId})`);
+      
+      // Buscar anúncios da conta selecionada
+      fetchAds(newAccountId);
+    }
+  };
+  
+  // Buscar anúncios de uma conta específica
+  const fetchAds = async (accountId) => {
+    if (!accountId) return;
+    
+    try {
+      setLoadingAds(true);
+      setAds([]);
+      console.log(`Buscando anúncios da conta ${accountId}...`);
+      const response = await integrationService.getMetaAds(accountId);
+      
+      if (response.data && response.data.success) {
+        const adsData = response.data.data.data || [];
+        setAds(adsData);
+        console.log(`Anúncios carregados: ${adsData.length}`);
+      } else {
+        console.log('Resposta recebida sem anúncios:', response.data);
+        setError(response.data?.error || 'Erro ao buscar anúncios');
+      }
+    } catch (err) {
+      console.error('Erro ao carregar anúncios:', err);
+      setError('Não foi possível carregar os anúncios. Por favor, tente novamente.');
+    } finally {
+      setLoadingAds(false);
     }
   };
 
@@ -193,17 +234,27 @@ const FacebookIntegration = ({ onIntegrationSuccess }) => {
       setError('');
       console.log(`Sincronizando conta ${accountId} para empresa ${selectedCompany}`);
       
+      // Mostrar indicador de carregamento enquanto sincroniza
+      setLoadingAds(true);
+      
       const response = await integrationService.syncMetaAdAccount(selectedCompany, accountId);
       
       if (response.data && response.data.success) {
         setSuccess(true);
+        
+        // Buscar anúncios atualizados após a sincronização
+        fetchAds(accountId);
+        
+        // Notificar o usuário do sucesso
         alert('Dados sincronizados com sucesso!');
       } else {
         setError(response.data?.error || 'Erro ao sincronizar dados');
+        setLoadingAds(false);
       }
     } catch (err) {
       console.error('Erro ao sincronizar conta:', err);
       setError(err.response?.data?.error || 'Erro ao sincronizar dados da conta');
+      setLoadingAds(false);
     }
   };
 
@@ -212,6 +263,8 @@ const FacebookIntegration = ({ onIntegrationSuccess }) => {
     setSuccess(false);
     setConnectionData(null);
     setAdAccounts([]);
+    setAds([]); // Limpar anúncios ao reconectar
+    setError('');
   };
 
   return (
@@ -355,6 +408,138 @@ const FacebookIntegration = ({ onIntegrationSuccess }) => {
               >
                 Sincronizar Dados
               </Button>
+              
+              {/* Exibir anúncios quando estiverem carregados */}
+              {loadingAds ? (
+                <Box sx={{ display: 'flex', justifyContent: 'center', my: 2 }}>
+                  <Typography variant="body2" sx={{ mr: 1 }}>Carregando anúncios</Typography>
+                  <CircularProgress size={24} />
+                </Box>
+              ) : ads.length > 0 ? (
+                <Box sx={{ mt: 3 }}>
+                  <Box sx={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', mb: 2 }}>
+                    <Typography variant="subtitle1">
+                      Anúncios da Conta ({ads.length})
+                    </Typography>
+                    <Button 
+                      variant="outlined" 
+                      size="small"
+                      onClick={() => {
+                        // Preparar dados para exportação
+                        const exportData = ads.map(ad => ({
+                          id: ad.id,
+                          name: ad.name,
+                          status: ad.status || ad.effectiveStatus,
+                          createdTime: ad.createdTime,
+                          updatedTime: ad.updatedTime,
+                          title: ad.creative?.title || '',
+                          body: ad.creative?.body || '',
+                          impressions: ad.insights?.impressions || 0,
+                          clicks: ad.insights?.clicks || 0,
+                          spend: ad.insights?.spend || 0
+                        }));
+                        
+                        // Criar o blob JSON para download
+                        const blob = new Blob([JSON.stringify(exportData, null, 2)], { type: 'application/json' });
+                        const url = URL.createObjectURL(blob);
+                        const a = document.createElement('a');
+                        a.href = url;
+                        a.download = `meta-ads-${connectionData.accountId}-${new Date().toISOString().slice(0, 10)}.json`;
+                        document.body.appendChild(a);
+                        a.click();
+                        document.body.removeChild(a);
+                        URL.revokeObjectURL(url);
+                      }}
+                    >
+                      Exportar Anúncios
+                    </Button>
+                  </Box>
+                  <Grid container spacing={2}>
+                    {ads.map(ad => (
+                      <Grid item xs={12} md={6} key={ad.id}>
+                        <Card variant="outlined" sx={{ display: 'flex', flexDirection: 'column', height: '100%' }}>
+                          <CardContent>
+                            <Typography variant="h6" component="div">
+                              {ad.name}
+                            </Typography>
+                            <Box sx={{ display: 'flex', alignItems: 'center', mb: 1 }}>
+                              <Chip 
+                                icon={ad.status === 'ACTIVE' ? <CheckCircleIcon /> : <CancelIcon />}
+                                label={ad.status || ad.effectiveStatus}
+                                color={ad.status === 'ACTIVE' ? 'success' : 'default'}
+                                size="small"
+                                sx={{ mr: 1 }}
+                              />
+                              <Typography variant="caption" color="text.secondary">
+                                ID: {ad.id}
+                              </Typography>
+                            </Box>
+                            
+                            {ad.creative && ad.creative.imageUrl && (
+                              <CardMedia
+                                component="img"
+                                sx={{ height: 140, objectFit: 'contain', mb: 1 }}
+                                image={ad.creative.imageUrl}
+                                alt={ad.name}
+                              />
+                            )}
+                            
+                            {ad.creative && ad.creative.title && (
+                              <Typography variant="subtitle2" gutterBottom>
+                                {ad.creative.title}
+                              </Typography>
+                            )}
+                            
+                            {ad.creative && ad.creative.body && (
+                              <Typography variant="body2" color="text.secondary" sx={{ mb: 1 }}>
+                                {ad.creative.body}
+                              </Typography>
+                            )}
+                            
+                            {ad.insights && (
+                              <Box sx={{ mt: 1, pt: 1, borderTop: '1px solid #eee' }}>
+                                <Typography variant="subtitle2" gutterBottom>
+                                  Performance:
+                                </Typography>
+                                <Grid container spacing={1}>
+                                  <Grid item xs={4}>
+                                    <Typography variant="caption" color="text.secondary">
+                                      Impressões
+                                    </Typography>
+                                    <Typography variant="body2">
+                                      {ad.insights.impressions || 0}
+                                    </Typography>
+                                  </Grid>
+                                  <Grid item xs={4}>
+                                    <Typography variant="caption" color="text.secondary">
+                                      Cliques
+                                    </Typography>
+                                    <Typography variant="body2">
+                                      {ad.insights.clicks || 0}
+                                    </Typography>
+                                  </Grid>
+                                  <Grid item xs={4}>
+                                    <Typography variant="caption" color="text.secondary">
+                                      Custo
+                                    </Typography>
+                                    <Typography variant="body2">
+                                      {ad.insights.spend || 0}
+                                    </Typography>
+                                  </Grid>
+                                </Grid>
+                              </Box>
+                            )}
+                          </CardContent>
+                        </Card>
+                      </Grid>
+                    ))}
+                  </Grid>
+                </Box>
+              ) : connectionData.accountId && !loadingAds ? (
+                <Alert severity="info" sx={{ mt: 2 }}>
+                  Nenhum anúncio encontrado para esta conta. Pode ser que não existam anúncios ativos ou que haja uma restrição de acesso.
+                </Alert>
+              ) : null}
             </>
           ) : (
             <Alert severity="info" sx={{ mt: 2 }}>

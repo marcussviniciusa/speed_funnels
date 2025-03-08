@@ -1,6 +1,7 @@
 const express = require('express');
 const router = express.Router();
 const integrationController = require('../controllers/integration.controller');
+const metaAdsController = require('../controllers/meta.ads.controller');
 const { authenticate } = require('../middlewares/auth.middleware');
 
 // Middleware de autenticação para todas as rotas
@@ -29,5 +30,8 @@ router.put('/:integrationId/disable', integrationController.disableIntegration);
 router.post('/company/:companyId/sync', integrationController.syncCompanyData);
 router.post('/connection/:connectionId/sync', integrationController.syncConnectionData);
 router.post('/sync/ad-account', integrationController.syncMetaAdAccount);
+
+// Rotas para buscar dados de anúncios do Meta
+router.get('/meta/ads/:accountId', metaAdsController.getMetaAds);
 
 module.exports = router;

@@ -12,6 +12,7 @@ import {
 } from '@mui/material';
 import { Visibility, VisibilityOff } from '@mui/icons-material';
 import { useAuth } from '../contexts/AuthContext';
+import { getRedirectPathForUser } from '../utils/authUtils';
 
 const Login = () => {
   const [email, setEmail] = useState('');
@@ -20,7 +21,7 @@ const Login = () => {
   const [isLoading, setIsLoading] = useState(false);
   const [error, setError] = useState('');
   
-  const { login } = useAuth();
+  const { login, user } = useAuth();
   const navigate = useNavigate();
 
   const handleSubmit = async (e) => {
@@ -31,7 +32,9 @@ const Login = () => {
     try {
       const success = await login(email, password);
       if (success) {
-        navigate('/dashboard');
+        // Redireciona com base no papel do usuário (superadmin ou usuário comum)
+        const redirectPath = getRedirectPathForUser(user);
+        navigate(redirectPath);
       } else {
         setError('Credenciais inválidas. Por favor, tente novamente.');
       }

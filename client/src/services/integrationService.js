@@ -67,6 +67,14 @@ const integrationService = {
       companyId,
       adAccountId
     });
+  },
+  
+  /**
+   * Busca anúncios de uma conta específica do Meta
+   * @param {string} adAccountId - ID da conta de anúncios
+   */
+  getMetaAds: async (adAccountId) => {
+    return await api.get(`/api/integrations/meta/ads/${adAccountId}`);
   }
 };
 
